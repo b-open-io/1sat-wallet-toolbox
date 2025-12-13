@@ -1,4 +1,5 @@
-import { Wallet, WalletStorageManager } from "@bsv/wallet-toolbox";
+import { Wallet, WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
+import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
 import {
   PrivateKey,
   KeyDeriver,
@@ -21,7 +22,6 @@ import { OrdLockIndexer } from "./indexers/OrdLockIndexer";
 import { OpNSIndexer } from "./indexers/OpNSIndexer";
 import { CosignIndexer } from "./indexers/CosignIndexer";
 import type { Indexer } from "./indexers/types";
-import type { Chain } from "@bsv/wallet-toolbox/out/src/sdk/types";
 
 interface SyncOutput {
   outpoint: string;
@@ -95,6 +95,16 @@ export interface OneSatWalletArgs {
    * Addresses owned by this wallet, used for filtering indexed outputs.
    */
   owners?: Set<string>;
+
+  /**
+   * Custom OrdFS server URL (default: https://ordfs.network)
+   */
+  ordfsUrl?: string;
+
+  /**
+   * Custom 1Sat indexer URL (default: based on chain - mainnet or testnet)
+   */
+  onesatUrl?: string;
 }
 
 /**
@@ -120,7 +130,7 @@ export class OneSatWallet extends Wallet {
       ? new ReadOnlySigner(args.rootKey as string)
       : new KeyDeriver(args.rootKey as PrivateKey);
 
-    const services = new OneSatServices(args.chain);
+    const services = new OneSatServices(args.chain, args.ordfsUrl, args.onesatUrl, args.storage);
     const network = args.chain === "main" ? "mainnet" : "testnet";
     const owners = args.owners || new Set<string>();
 
@@ -213,38 +223,29 @@ export class OneSatWallet extends Wallet {
    * @param isBroadcasted - Whether this transaction has been broadcast (affects validation)
    */
   async ingestTransaction(
-    tx: Transaction | number[],
+    tx: Transaction,
     description: string,
     labels?: string[],
     isBroadcasted = true
   ): Promise<InternalizeActionResult> {
     // Convert to Transaction if needed
-    const transaction =
-      tx instanceof Transaction ? tx : Transaction.fromBinary(tx);
 
+    for (const input of tx.inputs) {
+      if (!input.sourceTransaction) {
+        input.sourceTransaction = Transaction.fromBEEF(await this.oneSatServices.getBeefBytes(input.sourceTXID!));
+      }
+    }
     // Run through indexers
-    const parseResult = await this.parser.parse(transaction, isBroadcasted);
+    const parseResult = await this.parser.parse(tx, isBroadcasted);
 
     // Build InternalizeOutput array from parsed results
+    // All synced outputs use basket insertion since we don't have derivation data
     const outputs: InternalizeOutput[] = parseResult.outputs.map((parsed) => {
-      if (parsed.basket === "") {
-        // Empty basket = default wallet payment
-        return {
-          outputIndex: parsed.vout,
-          protocol: "wallet payment" as const,
-          paymentRemittance: {
-            derivationPrefix: "",
-            derivationSuffix: "",
-            senderIdentityKey: this.identityKey,
-          },
-        };
-      }
-      // Non-empty basket = basket insertion
       return {
         outputIndex: parsed.vout,
         protocol: "basket insertion" as const,
         insertionRemittance: {
-          basket: parsed.basket,
+          basket: parsed.basket || "default",
           tags: parsed.tags,
           customInstructions: parsed.customInstructions
             ? JSON.stringify(parsed.customInstructions)
@@ -259,12 +260,12 @@ export class OneSatWallet extends Wallet {
     }
 
     // Build BEEF for the transaction
-    const beef = new Beef();
-    beef.mergeTransaction(transaction);
+    // const beef = new Beef();
+    // beef.mergeTransaction(transaction);
 
     // Call parent's internalizeAction
     return this.internalizeAction({
-      tx: beef.toBinaryAtomic(transaction.id("hex")),
+      tx: tx.toAtomicBEEF(false),
       outputs,
       description,
       labels,
@@ -313,10 +314,10 @@ export class OneSatWallet extends Wallet {
               continue;
             }
             // Unspent - fetch and ingest
-            const beef = await this.oneSatServices.getBeefForTxid(txid);
-            const tx = beef.findTxid(txid)?.tx;
+            const beef = await this.oneSatServices.getBeefBytes(txid);
+            const tx = Transaction.fromBEEF(beef);
             if (tx) {
-              await this.ingestTransaction(tx, "sync");
+              await this.ingestTransaction(tx, "1sat-sync");
               this.emit("sync:tx", { address, txid, type: "output" });
             }
           } else if (output.spendTxid) {
@@ -327,10 +328,10 @@ export class OneSatWallet extends Wallet {
             });
 
             if (!hasSpend) {
-              const beef = await this.oneSatServices.getBeefForTxid(output.spendTxid);
-              const tx = beef.findTxid(output.spendTxid)?.tx;
+              const beef = await this.oneSatServices.getBeefBytes(output.spendTxid);
+              const tx = Transaction.fromBEEF(beef);
               if (tx) {
-                await this.ingestTransaction(tx, "sync");
+                await this.ingestTransaction(tx, "1sat-sync");
                 this.emit("sync:tx", { address, txid: output.spendTxid, type: "spend" });
               }
             }

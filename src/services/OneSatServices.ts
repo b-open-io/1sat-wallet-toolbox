@@ -1,4 +1,6 @@
 import { Beef, ChainTracker, Hash, MerklePath, Transaction, Utils } from "@bsv/sdk";
+import type { WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
+import { HttpError } from "../errors";
 import type {
   WalletServices,
   GetRawTxResult,
@@ -11,10 +13,10 @@ import type {
   GetUtxoStatusOutputFormat,
   ServicesCallHistory,
   ServiceCallHistory,
-} from "@bsv/wallet-toolbox/out/src/sdk/WalletServices.interfaces";
-import type { Chain } from "@bsv/wallet-toolbox/out/src/sdk/types";
-import { WalletError } from "@bsv/wallet-toolbox/out/src/sdk/WalletError";
-import type { TableOutput } from "@bsv/wallet-toolbox/out/src/storage/schema/tables/TableOutput";
+} from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletServices.interfaces";
+import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
+import { WalletError } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletError";
+import type { TableOutput } from "@bsv/wallet-toolbox/mobile/out/src/storage/schema/tables/TableOutput";
 import type { Bsv21TransactionData } from "../indexers/types";
 
 /**
@@ -30,6 +32,20 @@ export interface OrdfsMetadata {
   map?: { [key: string]: unknown };
 }
 
+/**
+ * BSV21 token details from the overlay
+ */
+export interface Bsv21TokenDetails {
+  id: string;
+  txid: string;
+  vout: number;
+  op: string;
+  amt: string;
+  sym?: string;
+  dec: number;
+  icon?: string;
+}
+
 
 /**
  * WalletServices implementation for 1Sat ecosystem.
@@ -42,22 +58,44 @@ export class OneSatServices implements WalletServices {
   chain: Chain;
   private ordfsBaseUrl: string;
   readonly onesatBaseUrl: string;
+  private bsv21TokenCache = new Map<string, Bsv21TokenDetails>();
+  private chainTracker: ChainTracker | null = null;
+  private storage?: WalletStorageManager;
 
-  constructor(chain: Chain, ordfsUrl?: string) {
+  constructor(chain: Chain, ordfsUrl?: string, onesatUrl?: string, storage?: WalletStorageManager) {
     this.chain = chain;
     this.ordfsBaseUrl = ordfsUrl || "https://ordfs.network";
-    this.onesatBaseUrl =
+    this.onesatBaseUrl = onesatUrl || (
       chain === "main"
         ? "https://ordinals.1sat.app"
-        : "https://testnet.ordinals.gorillapool.io";
+        : "https://testnet.ordinals.gorillapool.io"
+    );
+    this.storage = storage;
   }
 
   async getChainTracker(): Promise<ChainTracker> {
-    throw new Error("ChainTracker not yet implemented");
+    if (this.chainTracker) return this.chainTracker;
+
+    const baseUrl = this.onesatBaseUrl;
+    this.chainTracker = {
+      currentHeight: async (): Promise<number> => {
+        const resp = await fetch(`${baseUrl}/chaintracks/tip`);
+        if (!resp.ok) throw new Error(`Failed to fetch tip: ${resp.status}`);
+        const data = await resp.json();
+        return data.height;
+      },
+      isValidRootForHeight: async (root: string, height: number): Promise<boolean> => {
+        const resp = await fetch(`${baseUrl}/chaintracks/header/height/${height}`);
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        return data.merkleRoot === root;
+      },
+    };
+    return this.chainTracker;
   }
 
   async getHeaderForHeight(height: number): Promise<number[]> {
-    const resp = await fetch(`${this.ordfsBaseUrl}/v2/block/${height}`);
+    const resp = await fetch(`${this.onesatBaseUrl}/chaintracks/headers?height=${height}&count=1`);
     if (!resp.ok) {
       throw new Error(`Failed to fetch header for height ${height}: ${resp.statusText}`);
     }
@@ -66,7 +104,7 @@ export class OneSatServices implements WalletServices {
   }
 
   async getHeight(): Promise<number> {
-    const resp = await fetch(`${this.ordfsBaseUrl}/v2/chain/height`);
+    const resp = await fetch(`${this.onesatBaseUrl}/chaintracks/height`);
     if (!resp.ok) {
       throw new Error(`Failed to fetch chain height: ${resp.statusText}`);
     }
@@ -86,6 +124,21 @@ export class OneSatServices implements WalletServices {
   }
 
   async getRawTx(txid: string, _useNext?: boolean): Promise<GetRawTxResult> {
+    // Check storage first
+    if (this.storage) {
+      const rawTx = await this.storage.runAsStorageProvider(async (sp) => {
+        return await sp.getRawTxOfKnownValidTransaction(txid);
+      });
+      if (rawTx) {
+        return {
+          txid,
+          name: "storage",
+          rawTx,
+        };
+      }
+    }
+
+    // Fetch from network
     try {
       const resp = await fetch(`${this.ordfsBaseUrl}/v2/tx/${txid}`);
       if (!resp.ok) {
@@ -252,41 +305,76 @@ export class OneSatServices implements WalletServices {
     throw new Error("nLockTimeIsFinal not yet implemented");
   }
 
-  async getBeefForTxid(txid: string): Promise<Beef> {
-    const resp = await fetch(`${this.ordfsBaseUrl}/v2/tx/${txid}/beef`);
+  async getBeefBytes(txid: string): Promise<number[]> {
+    // Check storage first
+    if (this.storage) {
+      const txs = await this.storage.runAsStorageProvider(async (sp) => {
+        return await sp.findTransactions({ partial: { txid } });
+      });
+      if (txs.length > 0 && txs[0].inputBEEF) {
+        return txs[0].inputBEEF;
+      }
+    }
+
+    // Fetch from network
+    const resp = await fetch(`${this.onesatBaseUrl}/v5/tx/${txid}/beef`);
     if (!resp.ok) {
       throw new Error(`Failed to fetch BEEF for txid ${txid}: ${resp.statusText}`);
     }
     const arrayBuffer = await resp.arrayBuffer();
-    const beefBytes = Array.from(new Uint8Array(arrayBuffer));
+    return Array.from(new Uint8Array(arrayBuffer));
+  }
+
+  async getBeefForTxid(txid: string): Promise<Beef> {
+    const beefBytes = await this.getBeefBytes(txid);
     return Beef.fromBinary(beefBytes);
   }
 
   /**
    * Get OrdFS metadata for an outpoint
+   * @throws {HttpError} on HTTP errors (check status for specifics)
    */
   async getOrdfsMetadata(outpoint: string): Promise<OrdfsMetadata> {
     const resp = await fetch(
       `${this.ordfsBaseUrl}/v2/metadata/${outpoint}?map=true&parent=true`
     );
-    if (!resp.ok) throw new Error(`Failed to fetch OrdFS metadata: ${resp.statusText}`);
+    if (!resp.ok) {
+      throw new HttpError(resp.status, `OrdFS metadata fetch failed: ${resp.statusText}`);
+    }
     return await resp.json();
   }
 
   /**
    * Get BSV21 token data by txid from the overlay
+   * @throws {HttpError} on HTTP errors (check status for specifics)
    */
   async getBsv21TokenByTxid(
     _tokenId: string,
     txid: string
-  ): Promise<Bsv21TransactionData | undefined> {
-    try {
-      const resp = await fetch(`${this.onesatBaseUrl}/api/bsv21/tx/${txid}`);
-      if (!resp.ok) return undefined;
-      return await resp.json();
-    } catch {
-      return undefined;
+  ): Promise<Bsv21TransactionData> {
+    const resp = await fetch(`${this.onesatBaseUrl}/api/bsv21/tx/${txid}`);
+    if (!resp.ok) {
+      throw new HttpError(resp.status, `BSV21 token fetch failed: ${resp.statusText}`);
     }
+    return await resp.json();
+  }
+
+  /**
+   * Get BSV21 token details (metadata) by token ID
+   * Results are cached since token details are immutable
+   * @throws {HttpError} on HTTP errors (check status for specifics)
+   */
+  async getBsv21TokenDetails(tokenId: string): Promise<Bsv21TokenDetails> {
+    const cached = this.bsv21TokenCache.get(tokenId);
+    if (cached) return cached;
+
+    const resp = await fetch(`${this.onesatBaseUrl}/api/1sat/bsv21/${tokenId}`);
+    if (!resp.ok) {
+      throw new HttpError(resp.status, `BSV21 token details fetch failed: ${resp.statusText}`);
+    }
+    const details: Bsv21TokenDetails = await resp.json();
+    this.bsv21TokenCache.set(tokenId, details);
+    return details;
   }
 
   getServicesCallHistory(_reset?: boolean): ServicesCallHistory {

@@ -66,27 +66,37 @@ export class OrdLockIndexer extends Indexer {
   }
 
   async summerize(ctx: ParseContext): Promise<IndexSummary | undefined> {
-    // Check if any input was spending an ordlock (unlocking script contains SUFFIX)
+    // Check if any input was spending a listing
     for (const [vin, spend] of ctx.spends.entries()) {
-      if (!spend.script.length) continue;
-      if (
-        Buffer.from(
-          ctx.tx.inputs[vin].unlockingScript?.toBinary() || []
-        ).includes(SUFFIX)
-      ) {
-        return {
-          amount: 1,
-        };
+      if (spend.data[this.tag]) {
+        const unlockingScript = ctx.tx.inputs[vin].unlockingScript?.toBinary() || [];
+        if (Buffer.from(unlockingScript).includes(SUFFIX)) {
+          // Purchased via ordlock contract
+          return { amount: 1 };
+        } else {
+          // Cancelled/reclaimed by owner
+          return { amount: 0 };
+        }
       }
     }
 
-    // Check if any output is creating an ordlock
+    // Check if any output is creating a listing
     for (const txo of ctx.txos) {
       if (txo.data[this.tag]) {
-        return {
-          amount: -1,
-        };
+        return { amount: -1 };
       }
     }
+  }
+
+  serialize(listing: Listing): string {
+    return JSON.stringify({
+      payout: listing.payout,
+      price: listing.price.toString(10),
+    });
+  }
+
+  deserialize(str: string): Listing {
+    const obj = JSON.parse(str);
+    return new Listing(obj.payout, BigInt(obj.price));
   }
 }

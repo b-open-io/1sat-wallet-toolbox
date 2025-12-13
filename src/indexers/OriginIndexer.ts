@@ -7,6 +7,7 @@ import {
 import type { Inscription } from "./InscriptionIndexer";
 import type { Sigma } from "./SigmaIndexer";
 import type { OneSatServices } from "../services/OneSatServices";
+import { HttpError } from "../errors";
 
 export interface Origin {
   outpoint?: string;
@@ -70,8 +71,8 @@ export class OriginIndexer extends Indexer {
 
     if (sourceOutpoint) {
       // Transfer - fetch metadata from OrdFS
-      const metadata = await this.services.getOrdfsMetadata(sourceOutpoint);
-      if (metadata) {
+      try {
+        const metadata = await this.services.getOrdfsMetadata(sourceOutpoint);
         origin.outpoint = metadata.origin || sourceOutpoint;
         origin.nonce = metadata.sequence + 1;
         origin.map = metadata.map;
@@ -83,11 +84,12 @@ export class OriginIndexer extends Indexer {
             content: [],
           },
         };
-      } else {
-        // TODO: THis is bad logic. This would not mean that our outpoint is the origin. If we have a sourceOupoint, our outpoint is NOT the origin... ever
-        
-        // OrdFS doesn't know about source - treat as new origin
-        // origin.outpoint = txo.outpoint.toString();
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 404) {
+          // Source outpoint not found in OrdFS - cannot determine origin
+          return;
+        }
+        throw e;
       }
     } else {
       // New origin
@@ -106,11 +108,20 @@ export class OriginIndexer extends Indexer {
 
       // Validate parent if inscription claims one
       if (insc.parent) {
-        const metadata = await this.services.getOrdfsMetadata(
-          txo.outpoint.toString()
-        );
-        if (metadata?.parent !== insc.parent) {
-          delete origin.insc.parent;
+        try {
+          const metadata = await this.services.getOrdfsMetadata(
+            txo.outpoint.toString()
+          );
+          if (metadata.parent !== insc.parent) {
+            delete origin.insc.parent;
+          }
+        } catch (e) {
+          if (e instanceof HttpError && e.status === 404) {
+            // Can't verify parent claim - remove it
+            delete origin.insc.parent;
+          } else {
+            throw e;
+          }
         }
       }
     }

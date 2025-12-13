@@ -82,34 +82,37 @@ export class TransactionParser {
       const sourceTxid = input.sourceTransaction.id("hex");
       const sourceVout = input.sourceOutputIndex;
 
-      // Create txo structure for the source output
-      const sourceTxo: Txo = {
-        satoshis: BigInt(sourceOutput.satoshis || 0),
-        script: sourceOutput.lockingScript.toBinary(),
-        data: {},
-        outpoint: new Outpoint(sourceTxid, sourceVout),
-      };
+      // Build txos array for ALL outputs of the source transaction
+      // This ensures indexers can access ctx.txos[vout] at the correct index
+      const sourceTxos: Txo[] = input.sourceTransaction.outputs.map(
+        (output, vout) => ({
+          satoshis: BigInt(output.satoshis || 0),
+          script: output.lockingScript.toBinary(),
+          data: {},
+          outpoint: new Outpoint(sourceTxid, vout),
+        })
+      );
 
-      // Build a minimal context for parsing the source output
+      // Build context for parsing the source transaction
       const sourceCtx: ParseContext = {
         tx: input.sourceTransaction,
         txid: sourceTxid,
-        txos: [sourceTxo],
+        txos: sourceTxos,
         spends: [],
         summary: {},
         indexers: ctx.indexers,
       };
 
-      // Run all indexers on this source output
+      // Run all indexers on the specific source output we're spending
       for (const indexer of this.indexers) {
         const indexData = await indexer.parse(sourceCtx, sourceVout, false);
         if (indexData) {
-          sourceTxo.data[indexer.tag] = indexData;
+          sourceTxos[sourceVout].data[indexer.tag] = indexData;
         }
       }
 
-      // Add to ctx.spends
-      ctx.spends.push(sourceTxo);
+      // Add the spent output to ctx.spends
+      ctx.spends.push(sourceTxos[sourceVout]);
     }
   }
 

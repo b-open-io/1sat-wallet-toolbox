@@ -1,8 +1,45 @@
 import { OP, Script, Utils } from "@bsv/sdk";
+import { Indexer, type IndexData, type ParseContext } from "./types";
 
 export const MAP_PROTO = "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5";
 
-export class MapIndexer {
+export class MapIndexer extends Indexer {
+  tag = "map";
+  name = "MAP";
+
+  constructor(
+    public owners = new Set<string>(),
+    public network: "mainnet" | "testnet" = "mainnet"
+  ) {
+    super(owners, network);
+  }
+
+  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
+    const script = ctx.tx.outputs[vout].lockingScript;
+
+    const retPos = script.chunks.findIndex(
+      (chunk) => chunk.op === OP.OP_RETURN
+    );
+    if (retPos < 0 || !script.chunks[retPos]?.data?.length) {
+      return;
+    }
+
+    let chunks = Script.fromBinary(script.chunks[retPos].data).chunks;
+    while (chunks.length) {
+      if (Utils.toUTF8(chunks[0]?.data || []) === MAP_PROTO) {
+        const map = MapIndexer.parseMap(new Script(chunks), 1);
+        return map ? { data: map, tags: [] } : undefined;
+      }
+
+      const pipePos = chunks.findIndex(
+        (chunk) => chunk.data?.length === 1 && chunk.data[0] !== 0x7c
+      );
+      if (pipePos > -1) {
+        chunks = chunks.slice(pipePos + 1);
+      } else break;
+    }
+  }
+
   static parseMap(
     script: Script,
     mapPos: number

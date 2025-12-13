@@ -7,6 +7,7 @@ import {
 } from "./types";
 import { Outpoint } from "./Outpoint";
 import type { OneSatServices } from "../services/OneSatServices";
+import { HttpError } from "../errors";
 
 const FEE_XPUB =
   "xpub661MyMwAqRbcF221R74MPqdipLsgUevAAX4hZP2rywyEeShpbe3v2r9ciAvSGT6FB22TEmFLdUyeEDJL4ekG8s9H5WXbzDQPr6eW1zEYYy9";
@@ -73,7 +74,7 @@ export class Bsv21Indexer extends Indexer {
       return;
     }
 
-    if (!bsv21.amt || bsv21.amt <= 0n || bsv21.amt > BigInt(2 ** 64 - 1)) return;
+    if (!bsv21.amt || bsv21.amt <= 0n || bsv21.amt > 2n ** 64n - 1n) return;
 
     const outpoint = new Outpoint(ctx.txid, vout);
 
@@ -96,7 +97,6 @@ export class Bsv21Indexer extends Indexer {
 
     const tags: string[] = [];
     if (txo.owner && this.owners.has(txo.owner)) {
-      tags.push(`address:${txo.owner}`);
       tags.push(`id:${bsv21.id!}`);
     }
 
@@ -144,11 +144,11 @@ export class Bsv21Indexer extends Indexer {
       const token = tokens[tokenData.id];
 
       // Validate this specific input against the overlay
-      const overlayData = await this.services.getBsv21TokenByTxid(
-        tokenData.id,
-        spend.outpoint.txid
-      );
-      if (overlayData) {
+      try {
+        const overlayData = await this.services.getBsv21TokenByTxid(
+          tokenData.id,
+          spend.outpoint.txid
+        );
         const outputData = overlayData.outputs.find(
           (o) => o.vout === spend.outpoint.vout
         );
@@ -160,9 +160,13 @@ export class Bsv21Indexer extends Indexer {
           token.icon = bsv21OverlayData?.icon;
           token.dec = bsv21OverlayData?.dec || 0;
         }
-      } else {
-        // Overlay returned undefined - we don't have this input, so mark as pending
-        token.status = "pending";
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 404) {
+          // Overlay doesn't have this input - mark as pending
+          token.status = "pending";
+        } else {
+          throw e;
+        }
       }
 
       // Accumulate tokens in
@@ -244,6 +248,21 @@ export class Bsv21Indexer extends Indexer {
         icon: summaryToken.icon,
       };
     }
+  }
+
+  serialize(bsv21: Bsv21): string {
+    return JSON.stringify({
+      ...bsv21,
+      amt: bsv21.amt.toString(10),
+    });
+  }
+
+  deserialize(str: string): Bsv21 {
+    const obj = JSON.parse(str);
+    return {
+      ...obj,
+      amt: BigInt(obj.amt),
+    };
   }
 }
 
