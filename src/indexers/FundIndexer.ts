@@ -12,9 +12,8 @@ import { parseAddress } from "./parseAddress";
  *
  * Data structure: string (address)
  *
- * Basket: '' (default/empty basket)
+ * Basket: 'fund'
  * Tags: None
- * CustomInstructions: Just the owner address
  */
 export class FundIndexer extends Indexer {
   tag = "fund";
@@ -34,7 +33,7 @@ export class FundIndexer extends Indexer {
     if (txo.satoshis < 2n) return;
 
     txo.owner = address;
-    txo.basket = "";
+    txo.basket = "fund";
 
     return {
       data: address,

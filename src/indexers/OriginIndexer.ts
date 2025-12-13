@@ -135,9 +135,14 @@ export class OriginIndexer extends Indexer {
     if (txo.owner && this.owners.has(txo.owner)) {
       tags.push(`origin:${origin.outpoint || ""}`);
       if (origin.insc?.file?.type) {
-        tags.push("type");
-        tags.push(`type:${origin.insc.file.type.split("/")[0]}`);
-        tags.push(`type:${origin.insc.file.type}`);
+        const fullType = origin.insc.file.type;
+        const baseType = fullType.split(";")[0].trim(); // Strip encoding info (e.g., "; charset=utf-8")
+        const category = baseType.split("/")[0];
+        tags.push(`type:${category}`);
+        if (baseType !== fullType) {
+          tags.push(`type:${baseType}`);
+        }
+        tags.push(`type:${fullType}`);
       }
     }
 

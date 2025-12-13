@@ -176,24 +176,17 @@ export class TransactionParser {
         continue;
       }
 
-      let basket = "";
+      // Collect tags from all indexer data
       const tags: string[] = [];
-
-      // Determine basket based on which indexer claimed it
-      // Priority: origin > lock > fund (default)
-      if (txo.data.origin) {
-        basket = "1sat";
-        // TODO: Extract type tag from inscription data
-      } else if (txo.data.lock) {
-        basket = "lock";
-        // TODO: Add lock-specific tags
-      } else if (txo.data.fund) {
-        basket = "";
+      for (const indexData of Object.values(txo.data)) {
+        if (indexData.tags) {
+          tags.push(...indexData.tags);
+        }
       }
 
       outputs.push({
         vout: txo.outpoint.vout,
-        basket,
+        basket: txo.basket || "",
         tags,
         customInstructions:
           Object.keys(txo.data).length > 0 ? txo.data : undefined,

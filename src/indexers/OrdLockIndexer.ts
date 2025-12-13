@@ -55,13 +55,9 @@ export class OrdLockIndexer extends Indexer {
         Array.from(dataScript.chunks[0].data),
         this.network === "mainnet" ? [0] : [111]
       );
-    const tags: string[] = [];
-    if (txo.owner && this.owners.has(txo.owner)) {
-      tags.push(`price:${listing.price.toString(16).padStart(16, "0")}`);
-    }
     return {
       data: listing,
-      tags,
+      tags: ["ordlock"],
     };
   }
 

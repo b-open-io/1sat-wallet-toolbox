@@ -98,6 +98,7 @@ export class Bsv21Indexer extends Indexer {
     const tags: string[] = [];
     if (txo.owner && this.owners.has(txo.owner)) {
       tags.push(`id:${bsv21.id!}`);
+      tags.push(`id:${bsv21.id!}:${bsv21.status}`);
     }
 
     txo.basket = "bsv21";

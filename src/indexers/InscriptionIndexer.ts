@@ -123,14 +123,9 @@ export class InscriptionIndexer extends Indexer {
       }
     }
 
-    const tags: string[] = [];
-    if (txo.owner && this.owners.has(txo.owner)) {
-      tags.push(`address:${txo.owner}`);
-    }
-
     return {
       data: insc,
-      tags,
+      tags: [],
     };
   }
 }
