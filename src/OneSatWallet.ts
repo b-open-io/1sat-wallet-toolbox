@@ -273,6 +273,35 @@ export class OneSatWallet extends Wallet {
   }
 
   /**
+   * Broadcast a transaction and ingest it into the wallet if successful.
+   *
+   * @param tx - Transaction to broadcast
+   * @param description - Human-readable description for the transaction
+   * @param labels - Optional labels for the transaction
+   * @returns The internalize result if successful
+   * @throws Error if broadcast fails
+   */
+  async broadcast(
+    tx: Transaction,
+    description: string,
+    labels?: string[]
+  ): Promise<InternalizeActionResult> {
+    const txid = tx.id("hex");
+    const beef = new Beef();
+    beef.mergeTransaction(tx);
+
+    const results = await this.oneSatServices.postBeef(beef, [txid]);
+    const result = results[0];
+
+    if (result.status !== "success") {
+      const errorMsg = result.error?.message || "Broadcast failed";
+      throw new Error(`Broadcast failed for ${txid}: ${errorMsg}`);
+    }
+
+    return this.ingestTransaction(tx, description, labels, true);
+  }
+
+  /**
    * Sync a single address from the 1Sat indexer.
    * Fetches new outputs and spends, ingesting transactions as needed.
    *
