@@ -1,10 +1,10 @@
+import { parseAddress } from "./parseAddress";
 import {
-  Indexer,
   type IndexData,
   type IndexSummary,
+  Indexer,
   type ParseContext,
 } from "./types";
-import { parseAddress } from "./parseAddress";
 
 /**
  * FundIndexer identifies P2PKH outputs to owned addresses.
@@ -21,7 +21,7 @@ export class FundIndexer extends Indexer {
 
   constructor(
     public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet"
+    public network: "mainnet" | "testnet" = "mainnet",
   ) {
     super(owners, network);
   }
@@ -64,7 +64,9 @@ export class FundIndexer extends Indexer {
     // Calculate satoshis received to our addresses (outputs)
     satsIn = ctx.txos.reduce((acc, txo) => {
       if (!txo.data[this.tag]) return acc;
-      return acc + (txo.owner && this.owners.has(txo.owner) ? txo.satoshis : 0n);
+      return (
+        acc + (txo.owner && this.owners.has(txo.owner) ? txo.satoshis : 0n)
+      );
     }, 0n);
 
     const balance = Number(satsIn - satsOut);

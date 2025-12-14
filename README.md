@@ -1,17 +1,17 @@
-# 1sat-wallet-toolbox
+# @1sat/wallet-toolbox
 
 A BSV wallet library extending [@bsv/wallet-toolbox](https://github.com/bitcoin-sv/ts-sdk) with 1Sat Ordinals protocol support. Implements BRC-100 wallet interface with indexed transaction ingestion and address synchronization.
 
 ## Installation
 
 ```bash
-bun add 1sat-wallet-toolbox
+bun add @1sat/wallet-toolbox
 ```
 
 ## Quick Start
 
 ```typescript
-import { OneSatWallet, StorageIdb, WalletStorageManager } from "1sat-wallet-toolbox";
+import { OneSatWallet, StorageIdb, WalletStorageManager } from "@1sat/wallet-toolbox";
 import { PrivateKey } from "@bsv/sdk";
 
 // Create wallet with signing capability
@@ -36,7 +36,7 @@ const outputs = await wallet.listOutputs({ basket: "1sat" });
 Main wallet class extending `Wallet` from `@bsv/wallet-toolbox`.
 
 ```typescript
-import { OneSatWallet, StorageIdb, WalletStorageManager } from "1sat-wallet-toolbox";
+import { OneSatWallet, StorageIdb, WalletStorageManager } from "@1sat/wallet-toolbox";
 import { PrivateKey } from "@bsv/sdk";
 
 // Full signing mode
@@ -156,7 +156,7 @@ wallet.on("sync:complete", (event) => {
 WalletServices implementation for 1Sat ecosystem. Uses ordfs-server for blockchain data and OneSat API for broadcasting.
 
 ```typescript
-import { OneSatServices } from "1sat-wallet-toolbox";
+import { OneSatServices } from "@1sat/wallet-toolbox";
 
 const services = new OneSatServices("main", "https://ordfs.network");
 ```
@@ -193,7 +193,7 @@ const services = new OneSatServices("main", "https://ordfs.network");
 KeyDeriver implementation for read-only wallet mode. Throws on any signing operation.
 
 ```typescript
-import { ReadOnlySigner } from "1sat-wallet-toolbox";
+import { ReadOnlySigner } from "@1sat/wallet-toolbox";
 
 const signer = new ReadOnlySigner("02abc123..."); // public key hex
 ```
@@ -247,7 +247,7 @@ Tags enable filtered queries via `listOutputs({ tags })`. Tags are only added fo
 Runs indexers over transactions to extract basket/tags for wallet-toolbox storage.
 
 ```typescript
-import { TransactionParser, FundIndexer, OriginIndexer } from "1sat-wallet-toolbox";
+import { TransactionParser, FundIndexer, OriginIndexer } from "@1sat/wallet-toolbox";
 
 const parser = new TransactionParser(
   [new FundIndexer(owners, "mainnet"), new OriginIndexer(owners, "mainnet", services)],

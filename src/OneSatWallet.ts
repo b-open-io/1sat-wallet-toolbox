@@ -1,27 +1,27 @@
-import { Wallet, WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
-import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
 import {
-  PrivateKey,
-  KeyDeriver,
   Beef,
-  Transaction,
   type InternalizeActionResult,
   type InternalizeOutput,
+  KeyDeriver,
+  type PrivateKey,
+  Transaction,
 } from "@bsv/sdk";
-import { ReadOnlySigner } from "./signers/ReadOnlySigner";
-import { OneSatServices } from "./services/OneSatServices";
-import { TransactionParser } from "./indexers/TransactionParser";
-import { FundIndexer } from "./indexers/FundIndexer";
-import { LockIndexer } from "./indexers/LockIndexer";
-import { InscriptionIndexer } from "./indexers/InscriptionIndexer";
-import { SigmaIndexer } from "./indexers/SigmaIndexer";
-import { MapIndexer } from "./indexers/MapIndexer";
-import { OriginIndexer } from "./indexers/OriginIndexer";
+import { Wallet, type WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
+import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
 import { Bsv21Indexer } from "./indexers/Bsv21Indexer";
-import { OrdLockIndexer } from "./indexers/OrdLockIndexer";
-import { OpNSIndexer } from "./indexers/OpNSIndexer";
 import { CosignIndexer } from "./indexers/CosignIndexer";
+import { FundIndexer } from "./indexers/FundIndexer";
+import { InscriptionIndexer } from "./indexers/InscriptionIndexer";
+import { LockIndexer } from "./indexers/LockIndexer";
+import { MapIndexer } from "./indexers/MapIndexer";
+import { OpNSIndexer } from "./indexers/OpNSIndexer";
+import { OrdLockIndexer } from "./indexers/OrdLockIndexer";
+import { OriginIndexer } from "./indexers/OriginIndexer";
+import { SigmaIndexer } from "./indexers/SigmaIndexer";
+import { TransactionParser } from "./indexers/TransactionParser";
 import type { Indexer } from "./indexers/types";
+import { OneSatServices } from "./services/OneSatServices";
+import { ReadOnlySigner } from "./signers/ReadOnlySigner";
 
 interface SyncOutput {
   outpoint: string;
@@ -130,7 +130,12 @@ export class OneSatWallet extends Wallet {
       ? new ReadOnlySigner(args.rootKey as string)
       : new KeyDeriver(args.rootKey as PrivateKey);
 
-    const services = new OneSatServices(args.chain, args.ordfsUrl, args.onesatUrl, args.storage);
+    const services = new OneSatServices(
+      args.chain,
+      args.ordfsUrl,
+      args.onesatUrl,
+      args.storage,
+    );
     const network = args.chain === "main" ? "mainnet" : "testnet";
     const owners = args.owners || new Set<string>();
 
@@ -183,10 +188,10 @@ export class OneSatWallet extends Wallet {
    */
   on<K extends keyof OneSatWalletEvents>(
     event: K,
-    callback: EventCallback<OneSatWalletEvents[K]>
+    callback: EventCallback<OneSatWalletEvents[K]>,
   ): void {
     if (!this.listeners[event]) {
-      this.listeners[event] = new Set() as typeof this.listeners[K];
+      this.listeners[event] = new Set() as (typeof this.listeners)[K];
     }
     this.listeners[event]!.add(callback as never);
   }
@@ -196,14 +201,14 @@ export class OneSatWallet extends Wallet {
    */
   off<K extends keyof OneSatWalletEvents>(
     event: K,
-    callback: EventCallback<OneSatWalletEvents[K]>
+    callback: EventCallback<OneSatWalletEvents[K]>,
   ): void {
     this.listeners[event]?.delete(callback);
   }
 
   private emit<K extends keyof OneSatWalletEvents>(
     event: K,
-    data: OneSatWalletEvents[K]
+    data: OneSatWalletEvents[K],
   ): void {
     for (const cb of this.listeners[event] ?? []) {
       cb(data);
@@ -226,13 +231,15 @@ export class OneSatWallet extends Wallet {
     tx: Transaction,
     description: string,
     labels?: string[],
-    isBroadcasted = true
+    isBroadcasted = true,
   ): Promise<InternalizeActionResult> {
     // Convert to Transaction if needed
 
     for (const input of tx.inputs) {
       if (!input.sourceTransaction) {
-        input.sourceTransaction = Transaction.fromBEEF(await this.oneSatServices.getBeefBytes(input.sourceTXID!));
+        input.sourceTransaction = Transaction.fromBEEF(
+          await this.oneSatServices.getBeefBytes(input.sourceTXID!),
+        );
       }
     }
     // Run through indexers
@@ -284,7 +291,7 @@ export class OneSatWallet extends Wallet {
   async broadcast(
     tx: Transaction,
     description: string,
-    labels?: string[]
+    labels?: string[],
   ): Promise<InternalizeActionResult> {
     const txid = tx.id("hex");
     const beef = new Beef();
@@ -351,17 +358,27 @@ export class OneSatWallet extends Wallet {
             }
           } else if (output.spendTxid) {
             // We have the output, check if we have the spend
-            const hasSpend = await this.storage.runAsStorageProvider(async (sp) => {
-              const txs = await sp.findTransactions({ partial: { txid: output.spendTxid } });
-              return txs.length > 0;
-            });
+            const hasSpend = await this.storage.runAsStorageProvider(
+              async (sp) => {
+                const txs = await sp.findTransactions({
+                  partial: { txid: output.spendTxid },
+                });
+                return txs.length > 0;
+              },
+            );
 
             if (!hasSpend) {
-              const beef = await this.oneSatServices.getBeefBytes(output.spendTxid);
+              const beef = await this.oneSatServices.getBeefBytes(
+                output.spendTxid,
+              );
               const tx = Transaction.fromBEEF(beef);
               if (tx) {
                 await this.ingestTransaction(tx, "1sat-sync");
-                this.emit("sync:tx", { address, txid: output.spendTxid, type: "spend" });
+                this.emit("sync:tx", {
+                  address,
+                  txid: output.spendTxid,
+                  type: "spend",
+                });
               }
             }
           }

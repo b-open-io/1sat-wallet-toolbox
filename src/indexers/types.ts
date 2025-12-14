@@ -91,7 +91,7 @@ export abstract class Indexer {
 
   constructor(
     public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet"
+    public network: "mainnet" | "testnet" = "mainnet",
   ) {}
 
   /**
@@ -101,7 +101,7 @@ export abstract class Indexer {
   abstract parse(
     ctx: ParseContext,
     vout: number,
-    isBroadcasted: boolean
+    isBroadcasted: boolean,
   ): Promise<IndexData | undefined>;
 
   /**
@@ -109,7 +109,7 @@ export abstract class Indexer {
    */
   async summerize(
     _ctx: ParseContext,
-    _isBroadcasted: boolean
+    _isBroadcasted: boolean,
   ): Promise<IndexSummary | undefined> {
     return undefined;
   }

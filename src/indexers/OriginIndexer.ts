@@ -1,13 +1,13 @@
-import {
-  Indexer,
-  type IndexData,
-  type ParseContext,
-  type IndexSummary,
-} from "./types";
+import { HttpError } from "../errors";
+import type { OneSatServices } from "../services/OneSatServices";
 import type { Inscription } from "./InscriptionIndexer";
 import type { Sigma } from "./SigmaIndexer";
-import type { OneSatServices } from "../services/OneSatServices";
-import { HttpError } from "../errors";
+import {
+  type IndexData,
+  type IndexSummary,
+  Indexer,
+  type ParseContext,
+} from "./types";
 
 export interface Origin {
   outpoint?: string;
@@ -24,7 +24,7 @@ export class OriginIndexer extends Indexer {
   constructor(
     public owners = new Set<string>(),
     public network: "mainnet" | "testnet" = "mainnet",
-    private services: OneSatServices
+    private services: OneSatServices,
   ) {
     super(owners, network);
   }
@@ -44,7 +44,7 @@ export class OriginIndexer extends Indexer {
     }
 
     // Start with empty origin
-    let origin: Origin = {
+    const origin: Origin = {
       outpoint: "",
       nonce: 0,
       sigma: txo.data.sigma?.data as Sigma[],
@@ -97,7 +97,9 @@ export class OriginIndexer extends Indexer {
     }
 
     // Merge current output's MAP data with inherited
-    const currentMap = txo.data.map?.data as { [key: string]: unknown } | undefined;
+    const currentMap = txo.data.map?.data as
+      | { [key: string]: unknown }
+      | undefined;
     if (currentMap) {
       origin.map = { ...(origin.map || {}), ...currentMap };
     }
@@ -110,7 +112,7 @@ export class OriginIndexer extends Indexer {
       if (insc.parent) {
         try {
           const metadata = await this.services.getOrdfsMetadata(
-            txo.outpoint.toString()
+            txo.outpoint.toString(),
           );
           if (metadata.parent !== insc.parent) {
             delete origin.insc.parent;
