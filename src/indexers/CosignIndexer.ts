@@ -1,5 +1,5 @@
 import { OP, Utils } from "@bsv/sdk";
-import { Indexer, type IndexData, type ParseContext } from "./types";
+import { type IndexData, Indexer, type ParseContext } from "./types";
 
 export interface Cosign {
   address: string;
@@ -12,7 +12,7 @@ export class CosignIndexer extends Indexer {
 
   constructor(
     public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet"
+    public network: "mainnet" | "testnet" = "mainnet",
   ) {
     super(owners, network);
   }
@@ -36,7 +36,7 @@ export class CosignIndexer extends Indexer {
           cosigner: Utils.toHex(chunks[5 + i].data || []),
           address: Utils.toBase58Check(
             chunks[2 + i].data || [],
-            this.network === "mainnet" ? [0] : [111]
+            this.network === "mainnet" ? [0] : [111],
           ),
         };
         txo.owner = cosign.address;

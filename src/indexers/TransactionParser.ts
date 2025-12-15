@@ -1,7 +1,10 @@
 import { Transaction } from "@bsv/sdk";
-import type { Indexer, ParseContext, Txo } from "./types";
-import type { OneSatServices, ParsedOutputInfo } from "../services/OneSatServices";
+import type {
+  OneSatServices,
+  ParsedOutputInfo,
+} from "../services/OneSatServices";
 import { Outpoint } from "./Outpoint";
+import type { Indexer, ParseContext, Txo } from "./types";
 
 /**
  * Represents the result of parsing a single output
@@ -34,7 +37,7 @@ export class TransactionParser {
   constructor(
     public indexers: Indexer[],
     public owners: Set<string>,
-    private services: OneSatServices
+    private services: OneSatServices,
   ) {}
 
   /**
@@ -92,7 +95,7 @@ export class TransactionParser {
           script: output.lockingScript.toBinary(),
           data: {},
           outpoint: new Outpoint(sourceTxid, vout),
-        })
+        }),
       );
 
       // Build context for parsing the source transaction

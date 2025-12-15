@@ -1,4 +1,10 @@
-import { PublicKey, type KeyDeriverApi, type PrivateKey, type WalletProtocol, type Counterparty } from "@bsv/sdk";
+import {
+  type Counterparty,
+  type KeyDeriverApi,
+  type PrivateKey,
+  PublicKey,
+  type WalletProtocol,
+} from "@bsv/sdk";
 
 /**
  * A mock PrivateKey that only supports toPublicKey().
@@ -34,13 +40,15 @@ export class ReadOnlySigner implements KeyDeriverApi {
 
   constructor(identityPublicKey: string) {
     this.identityKey = identityPublicKey;
-    this.rootKey = new ReadOnlyPrivateKey(identityPublicKey) as unknown as PrivateKey;
+    this.rootKey = new ReadOnlyPrivateKey(
+      identityPublicKey,
+    ) as unknown as PrivateKey;
   }
 
   derivePrivateKey(
     _protocolID: WalletProtocol,
     _keyID: string,
-    _counterparty: Counterparty
+    _counterparty: Counterparty,
   ): never {
     throw new Error("Cannot derive private key in read-only mode");
   }
@@ -49,7 +57,7 @@ export class ReadOnlySigner implements KeyDeriverApi {
     _protocolID: WalletProtocol,
     _keyID: string,
     _counterparty: Counterparty,
-    _forSelf?: boolean
+    _forSelf?: boolean,
   ): never {
     throw new Error("Cannot derive public key in read-only mode");
   }
@@ -57,7 +65,7 @@ export class ReadOnlySigner implements KeyDeriverApi {
   deriveSymmetricKey(
     _protocolID: WalletProtocol,
     _keyID: string,
-    _counterparty: Counterparty
+    _counterparty: Counterparty,
   ): never {
     throw new Error("Cannot derive symmetric key in read-only mode");
   }
@@ -69,7 +77,7 @@ export class ReadOnlySigner implements KeyDeriverApi {
   revealSpecificSecret(
     _counterparty: Counterparty,
     _protocolID: WalletProtocol,
-    _keyID: string
+    _keyID: string,
   ): never {
     throw new Error("Cannot reveal secrets in read-only mode");
   }

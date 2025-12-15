@@ -1,6 +1,6 @@
 import {
-  BigNumber,
   BSM,
+  BigNumber,
   Hash,
   OP,
   type PublicKey,
@@ -8,7 +8,7 @@ import {
   Signature,
   Utils,
 } from "@bsv/sdk";
-import { Indexer, type IndexData, type ParseContext } from "./types";
+import { type IndexData, Indexer, type ParseContext } from "./types";
 
 export interface Sigma {
   algorithm: string;
@@ -24,7 +24,7 @@ export class SigmaIndexer extends Indexer {
 
   constructor(
     public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet"
+    public network: "mainnet" | "testnet" = "mainnet",
   ) {
     super(owners, network);
   }
@@ -40,11 +40,7 @@ export class SigmaIndexer extends Indexer {
         retPos = i;
         continue;
       }
-      if (
-        !retPos ||
-        chunk.data?.length !== 1 ||
-        chunk.data[0] !== 0x7c
-      ) {
+      if (!retPos || chunk.data?.length !== 1 || chunk.data[0] !== 0x7c) {
         continue;
       }
 
@@ -85,7 +81,7 @@ export class SigmaIndexer extends Indexer {
         try {
           publicKey = signature.RecoverPublicKey(
             recovery,
-            new BigNumber(BSM.magicHash(msgHash))
+            new BigNumber(BSM.magicHash(msgHash)),
           );
           const sigFitsPubkey = BSM.verify(msgHash, signature, publicKey);
           if (sigFitsPubkey && publicKey.toAddress() === sigma.address) {

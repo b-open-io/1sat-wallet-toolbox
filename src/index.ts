@@ -4,8 +4,12 @@ if (typeof globalThis.Buffer === "undefined") {
   (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 }
 
-export { OneSatWallet, type OneSatWalletArgs, type IngestResult } from "./OneSatWallet";
-export { type ParseResult, type ParsedOutput } from "./indexers/TransactionParser";
+export {
+  OneSatWallet,
+  type OneSatWalletArgs,
+  type IngestResult,
+} from "./OneSatWallet";
+export type { ParseResult, ParsedOutput } from "./indexers/TransactionParser";
 export {
   OneSatServices,
   type OrdfsMetadata,

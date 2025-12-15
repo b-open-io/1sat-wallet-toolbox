@@ -1,22 +1,29 @@
-import { Beef, ChainTracker, Hash, MerklePath, Transaction, Utils } from "@bsv/sdk";
+import {
+  Beef,
+  type ChainTracker,
+  Hash,
+  MerklePath,
+  type Transaction,
+  Utils,
+} from "@bsv/sdk";
 import type { WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
-import { HttpError } from "../errors";
+import { WalletError } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletError";
 import type {
-  WalletServices,
-  GetRawTxResult,
-  GetMerklePathResult,
-  PostBeefResult,
-  GetUtxoStatusResult,
-  GetStatusForTxidsResult,
-  GetScriptHashHistoryResult,
   BlockHeader,
+  GetMerklePathResult,
+  GetRawTxResult,
+  GetScriptHashHistoryResult,
+  GetStatusForTxidsResult,
   GetUtxoStatusOutputFormat,
-  ServicesCallHistory,
+  GetUtxoStatusResult,
+  PostBeefResult,
   ServiceCallHistory,
+  ServicesCallHistory,
+  WalletServices,
 } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletServices.interfaces";
 import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
-import { WalletError } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletError";
 import type { TableOutput } from "@bsv/wallet-toolbox/mobile/out/src/storage/schema/tables/TableOutput";
+import { HttpError } from "../errors";
 import type { Bsv21TransactionData } from "../indexers/types";
 
 export interface SyncOutput {
@@ -39,7 +46,12 @@ export interface OneSatServicesEvents {
   "sync:start": { address: string; fromScore: number };
   "sync:output": { address: string; output: SyncOutput };
   "sync:skipped": { address: string; outpoint: string; reason: string };
-  "sync:parsed": { address: string; txid: string; outputs: ParsedOutputInfo[]; internalizedCount: number };
+  "sync:parsed": {
+    address: string;
+    txid: string;
+    outputs: ParsedOutputInfo[];
+    internalizedCount: number;
+  };
   "sync:error": { address: string; error: Error };
   "sync:complete": { address: string };
 }
@@ -74,7 +86,6 @@ export interface Bsv21TokenDetails {
   icon?: string;
 }
 
-
 /**
  * WalletServices implementation for 1Sat ecosystem.
  *
@@ -94,39 +105,49 @@ export class OneSatServices implements WalletServices {
   private activeSyncs = new Map<string, EventSource>();
   private syncHandlers = new Map<string, SyncOutputHandler>();
   private listeners: {
-    [K in keyof OneSatServicesEvents]?: Set<EventCallback<OneSatServicesEvents[K]>>;
+    [K in keyof OneSatServicesEvents]?: Set<
+      EventCallback<OneSatServicesEvents[K]>
+    >;
   } = {};
 
   constructor(chain: Chain, baseUrl?: string, storage?: WalletStorageManager) {
     this.chain = chain;
-    this.baseUrl = baseUrl || (
-      chain === "main"
+    this.baseUrl =
+      baseUrl ||
+      (chain === "main"
         ? "https://api.1sat.app"
-        : "https://testnet.api.1sat.app"
-    );
+        : "https://testnet.api.1sat.app");
     this.storage = storage;
   }
 
   on<K extends keyof OneSatServicesEvents>(
     event: K,
-    callback: EventCallback<OneSatServicesEvents[K]>
+    callback: EventCallback<OneSatServicesEvents[K]>,
   ): void {
     if (!this.listeners[event]) {
-      (this.listeners as Record<K, Set<EventCallback<OneSatServicesEvents[K]>>>)[event] = new Set();
+      (
+        this.listeners as Record<K, Set<EventCallback<OneSatServicesEvents[K]>>>
+      )[event] = new Set();
     }
-    (this.listeners[event] as Set<EventCallback<OneSatServicesEvents[K]>>).add(callback);
+    (this.listeners[event] as Set<EventCallback<OneSatServicesEvents[K]>>).add(
+      callback,
+    );
   }
 
   off<K extends keyof OneSatServicesEvents>(
     event: K,
-    callback: EventCallback<OneSatServicesEvents[K]>
+    callback: EventCallback<OneSatServicesEvents[K]>,
   ): void {
-    (this.listeners[event] as Set<EventCallback<OneSatServicesEvents[K]>> | undefined)?.delete(callback);
+    (
+      this.listeners[event] as
+        | Set<EventCallback<OneSatServicesEvents[K]>>
+        | undefined
+    )?.delete(callback);
   }
 
   emit<K extends keyof OneSatServicesEvents>(
     event: K,
-    data: OneSatServicesEvents[K]
+    data: OneSatServicesEvents[K],
   ): void {
     for (const cb of this.listeners[event] ?? []) {
       cb(data);
@@ -192,13 +213,19 @@ export class OneSatServices implements WalletServices {
 
     eventSource.addEventListener("error", () => {
       cleanup();
-      this.emit("sync:error", { address, error: new Error("SSE connection error") });
+      this.emit("sync:error", {
+        address,
+        error: new Error("SSE connection error"),
+      });
     });
 
     eventSource.onerror = () => {
       if (eventSource.readyState === EventSource.CLOSED) {
         cleanup();
-        this.emit("sync:error", { address, error: new Error("SSE connection closed") });
+        this.emit("sync:error", {
+          address,
+          error: new Error("SSE connection closed"),
+        });
       }
     };
   }
@@ -235,7 +262,10 @@ export class OneSatServices implements WalletServices {
         const data = await resp.json();
         return data.height;
       },
-      isValidRootForHeight: async (root: string, height: number): Promise<boolean> => {
+      isValidRootForHeight: async (
+        root: string,
+        height: number,
+      ): Promise<boolean> => {
         const resp = await fetch(`${baseUrl}/block/header/height/${height}`);
         if (!resp.ok) return false;
         const data = await resp.json();
@@ -246,9 +276,13 @@ export class OneSatServices implements WalletServices {
   }
 
   async getHeaderForHeight(height: number): Promise<number[]> {
-    const resp = await fetch(`${this.baseUrl}/block/headers?height=${height}&count=1`);
+    const resp = await fetch(
+      `${this.baseUrl}/block/headers?height=${height}&count=1`,
+    );
     if (!resp.ok) {
-      throw new Error(`Failed to fetch header for height ${height}: ${resp.statusText}`);
+      throw new Error(
+        `Failed to fetch header for height ${height}: ${resp.statusText}`,
+      );
     }
     const arrayBuffer = await resp.arrayBuffer();
     return Array.from(new Uint8Array(arrayBuffer));
@@ -269,7 +303,7 @@ export class OneSatServices implements WalletServices {
 
   async getFiatExchangeRate(
     _currency: "USD" | "GBP" | "EUR",
-    _base?: "USD" | "GBP" | "EUR"
+    _base?: "USD" | "GBP" | "EUR",
   ): Promise<number> {
     throw new Error("Fiat exchange rate not yet implemented");
   }
@@ -295,7 +329,10 @@ export class OneSatServices implements WalletServices {
       if (!resp.ok) {
         return {
           txid,
-          error: new WalletError("FETCH_FAILED", `Failed to fetch transaction: ${resp.statusText}`),
+          error: new WalletError(
+            "FETCH_FAILED",
+            `Failed to fetch transaction: ${resp.statusText}`,
+          ),
         };
       }
       const arrayBuffer = await resp.arrayBuffer();
@@ -310,19 +347,25 @@ export class OneSatServices implements WalletServices {
         txid,
         error: new WalletError(
           "NETWORK_ERROR",
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : "Unknown error",
         ),
       };
     }
   }
 
-  async getMerklePath(txid: string, _useNext?: boolean): Promise<GetMerklePathResult> {
+  async getMerklePath(
+    txid: string,
+    _useNext?: boolean,
+  ): Promise<GetMerklePathResult> {
     try {
       const resp = await fetch(`${this.baseUrl}/tx/${txid}/proof`);
       if (!resp.ok) {
         return {
           name: "1sat-api",
-          error: new WalletError("FETCH_FAILED", `Failed to fetch merkle proof: ${resp.statusText}`),
+          error: new WalletError(
+            "FETCH_FAILED",
+            `Failed to fetch merkle proof: ${resp.statusText}`,
+          ),
         };
       }
       const arrayBuffer = await resp.arrayBuffer();
@@ -338,7 +381,7 @@ export class OneSatServices implements WalletServices {
         name: "1sat-api",
         error: new WalletError(
           "NETWORK_ERROR",
-          error instanceof Error ? error.message : "Unknown error"
+          error instanceof Error ? error.message : "Unknown error",
         ),
       };
     }
@@ -354,7 +397,10 @@ export class OneSatServices implements WalletServices {
           results.push({
             name: "1sat-api",
             status: "error",
-            error: new WalletError("TX_NOT_FOUND", `Transaction ${txid} not found in BEEF`),
+            error: new WalletError(
+              "TX_NOT_FOUND",
+              `Transaction ${txid} not found in BEEF`,
+            ),
             txidResults: [
               {
                 txid,
@@ -391,7 +437,10 @@ export class OneSatServices implements WalletServices {
           results.push({
             name: "1sat-api",
             status: "error",
-            error: new WalletError(resp.status.toString(), body.error || resp.statusText),
+            error: new WalletError(
+              resp.status.toString(),
+              body.error || resp.statusText,
+            ),
             txidResults: [
               {
                 txid,
@@ -407,7 +456,7 @@ export class OneSatServices implements WalletServices {
           status: "error",
           error: new WalletError(
             "NETWORK_ERROR",
-            error instanceof Error ? error.message : "Unknown error"
+            error instanceof Error ? error.message : "Unknown error",
           ),
           txidResults: [
             {
@@ -427,7 +476,10 @@ export class OneSatServices implements WalletServices {
     return Utils.toHex(Hash.hash256(scriptBin).reverse());
   }
 
-  async getStatusForTxids(_txids: string[], _useNext?: boolean): Promise<GetStatusForTxidsResult> {
+  async getStatusForTxids(
+    _txids: string[],
+    _useNext?: boolean,
+  ): Promise<GetStatusForTxidsResult> {
     throw new Error("getStatusForTxids not yet implemented");
   }
 
@@ -439,12 +491,15 @@ export class OneSatServices implements WalletServices {
     _output: string,
     _outputFormat?: GetUtxoStatusOutputFormat,
     _outpoint?: string,
-    _useNext?: boolean
+    _useNext?: boolean,
   ): Promise<GetUtxoStatusResult> {
     throw new Error("getUtxoStatus not yet implemented");
   }
 
-  async getScriptHashHistory(_hash: string, _useNext?: boolean): Promise<GetScriptHashHistoryResult> {
+  async getScriptHashHistory(
+    _hash: string,
+    _useNext?: boolean,
+  ): Promise<GetScriptHashHistoryResult> {
     throw new Error("getScriptHashHistory not yet implemented");
   }
 
@@ -452,7 +507,9 @@ export class OneSatServices implements WalletServices {
     throw new Error("hashToHeader not yet implemented");
   }
 
-  async nLockTimeIsFinal(_txOrLockTime: string | number[] | Transaction | number): Promise<boolean> {
+  async nLockTimeIsFinal(
+    _txOrLockTime: string | number[] | Transaction | number,
+  ): Promise<boolean> {
     throw new Error("nLockTimeIsFinal not yet implemented");
   }
 
@@ -470,7 +527,9 @@ export class OneSatServices implements WalletServices {
     // Fetch from network
     const resp = await fetch(`${this.baseUrl}/tx/${txid}/beef`);
     if (!resp.ok) {
-      throw new Error(`Failed to fetch BEEF for txid ${txid}: ${resp.statusText}`);
+      throw new Error(
+        `Failed to fetch BEEF for txid ${txid}: ${resp.statusText}`,
+      );
     }
     const arrayBuffer = await resp.arrayBuffer();
     return Array.from(new Uint8Array(arrayBuffer));
@@ -488,7 +547,10 @@ export class OneSatServices implements WalletServices {
   async getOrdfsMetadata(outpoint: string): Promise<OrdfsMetadata> {
     const resp = await fetch(`${this.baseUrl}/ordfs/metadata/${outpoint}`);
     if (!resp.ok) {
-      throw new HttpError(resp.status, `TXO metadata fetch failed: ${resp.statusText}`);
+      throw new HttpError(
+        resp.status,
+        `TXO metadata fetch failed: ${resp.statusText}`,
+      );
     }
     return await resp.json();
   }
@@ -499,11 +561,14 @@ export class OneSatServices implements WalletServices {
    */
   async getBsv21TokenByTxid(
     _tokenId: string,
-    txid: string
+    txid: string,
   ): Promise<Bsv21TransactionData> {
     const resp = await fetch(`${this.baseUrl}/bsv21/tx/${txid}`);
     if (!resp.ok) {
-      throw new HttpError(resp.status, `BSV21 token fetch failed: ${resp.statusText}`);
+      throw new HttpError(
+        resp.status,
+        `BSV21 token fetch failed: ${resp.statusText}`,
+      );
     }
     return await resp.json();
   }
@@ -519,7 +584,10 @@ export class OneSatServices implements WalletServices {
 
     const resp = await fetch(`${this.baseUrl}/bsv21/token/${tokenId}`);
     if (!resp.ok) {
-      throw new HttpError(resp.status, `BSV21 token details fetch failed: ${resp.statusText}`);
+      throw new HttpError(
+        resp.status,
+        `BSV21 token details fetch failed: ${resp.statusText}`,
+      );
     }
     const details: Bsv21TokenDetails = await resp.json();
     this.bsv21TokenCache.set(tokenId, details);
@@ -539,8 +607,14 @@ export class OneSatServices implements WalletServices {
       postBeef: { ...emptyHistory, serviceName: "postBeef" },
       getUtxoStatus: { ...emptyHistory, serviceName: "getUtxoStatus" },
       getStatusForTxids: { ...emptyHistory, serviceName: "getStatusForTxids" },
-      getScriptHashHistory: { ...emptyHistory, serviceName: "getScriptHashHistory" },
-      updateFiatExchangeRates: { ...emptyHistory, serviceName: "updateFiatExchangeRates" },
+      getScriptHashHistory: {
+        ...emptyHistory,
+        serviceName: "getScriptHashHistory",
+      },
+      updateFiatExchangeRates: {
+        ...emptyHistory,
+        serviceName: "updateFiatExchangeRates",
+      },
     };
   }
 }

@@ -1,6 +1,6 @@
 import { Utils } from "@bsv/sdk";
-import { Indexer, type IndexData, type ParseContext } from "./types";
 import type { Inscription } from "./InscriptionIndexer";
+import { type IndexData, Indexer, type ParseContext } from "./types";
 
 export class OpNSIndexer extends Indexer {
   tag = "opns";
@@ -8,7 +8,7 @@ export class OpNSIndexer extends Indexer {
 
   constructor(
     public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet"
+    public network: "mainnet" | "testnet" = "mainnet",
   ) {
     super(owners, network);
   }

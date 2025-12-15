@@ -1,5 +1,5 @@
 import { OP, Script, Utils } from "@bsv/sdk";
-import { Indexer, type IndexData, type ParseContext } from "./types";
+import { type IndexData, Indexer, type ParseContext } from "./types";
 
 export const MAP_PROTO = "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5";
 
@@ -9,7 +9,7 @@ export class MapIndexer extends Indexer {
 
   constructor(
     public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet"
+    public network: "mainnet" | "testnet" = "mainnet",
   ) {
     super(owners, network);
   }
@@ -18,7 +18,7 @@ export class MapIndexer extends Indexer {
     const script = ctx.tx.outputs[vout].lockingScript;
 
     const retPos = script.chunks.findIndex(
-      (chunk) => chunk.op === OP.OP_RETURN
+      (chunk) => chunk.op === OP.OP_RETURN,
     );
     if (retPos < 0 || !script.chunks[retPos]?.data?.length) {
       return;
@@ -32,7 +32,7 @@ export class MapIndexer extends Indexer {
       }
 
       const pipePos = chunks.findIndex(
-        (chunk) => chunk.data?.length === 1 && chunk.data[0] !== 0x7c
+        (chunk) => chunk.data?.length === 1 && chunk.data[0] !== 0x7c,
       );
       if (pipePos > -1) {
         chunks = chunks.slice(pipePos + 1);
@@ -42,7 +42,7 @@ export class MapIndexer extends Indexer {
 
   static parseMap(
     script: Script,
-    mapPos: number
+    mapPos: number,
   ): { [key: string]: unknown } | undefined {
     if (Utils.toUTF8(script.chunks[mapPos]?.data || []) !== "SET") {
       return;

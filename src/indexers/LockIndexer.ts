@@ -1,5 +1,10 @@
 import { Script, Utils } from "@bsv/sdk";
-import { Indexer, type IndexData, type IndexSummary, type ParseContext } from "./types";
+import {
+  type IndexData,
+  type IndexSummary,
+  Indexer,
+  type ParseContext,
+} from "./types";
 
 const lockPrefix =
   "2097dfd76851bf465e8f715593b217714858bbe9570ff3bd5e33840a34e20ff0262102ba79df5f8ae7604a9830f03c7933028186aede0675a16f025dc4f8be8eec0382201008ce7480da41702918d1ec8e6849ba32b4d65b1e40dc669c31a1e6306b266c0000";
@@ -29,21 +34,24 @@ export class LockIndexer extends Indexer {
     if (suffixIdx === -1) return;
 
     const dataScript = Script.fromBinary(
-      Array.from(script.subarray(prefixIdx + PREFIX.length, suffixIdx))
+      Array.from(script.subarray(prefixIdx + PREFIX.length, suffixIdx)),
     );
 
-    if (dataScript.chunks[0]?.data?.length !== 20 || !dataScript.chunks[1]?.data) {
+    if (
+      dataScript.chunks[0]?.data?.length !== 20 ||
+      !dataScript.chunks[1]?.data
+    ) {
       return;
     }
 
-    const until = parseInt(
+    const until = Number.parseInt(
       Buffer.from(dataScript.chunks[1].data).reverse().toString("hex"),
-      16
+      16,
     );
 
     txo.owner = Utils.toBase58Check(
       dataScript.chunks[0].data,
-      this.network === "mainnet" ? [0] : [111]
+      this.network === "mainnet" ? [0] : [111],
     );
     txo.basket = "lock";
 
@@ -57,7 +65,8 @@ export class LockIndexer extends Indexer {
     let locksOut = 0n;
     for (const spend of ctx.spends) {
       if (spend.data[this.tag]) {
-        locksOut += spend.owner && this.owners.has(spend.owner) ? spend.satoshis : 0n;
+        locksOut +=
+          spend.owner && this.owners.has(spend.owner) ? spend.satoshis : 0n;
       }
     }
 

@@ -1,13 +1,13 @@
-import { Hash, HD, Utils } from "@bsv/sdk";
+import { HD, Hash, Utils } from "@bsv/sdk";
+import { HttpError } from "../errors";
+import type { OneSatServices } from "../services/OneSatServices";
+import { Outpoint } from "./Outpoint";
 import {
-  Indexer,
   type IndexData,
   type IndexSummary,
+  Indexer,
   type ParseContext,
 } from "./types";
-import { Outpoint } from "./Outpoint";
-import type { OneSatServices } from "../services/OneSatServices";
-import { HttpError } from "../errors";
 
 const FEE_XPUB =
   "xpub661MyMwAqRbcF221R74MPqdipLsgUevAAX4hZP2rywyEeShpbe3v2r9ciAvSGT6FB22TEmFLdUyeEDJL4ekG8s9H5WXbzDQPr6eW1zEYYy9";
@@ -39,9 +39,9 @@ export class Bsv21Indexer extends Indexer {
   name = "BSV21 Tokens";
 
   constructor(
-    public owners = new Set<string>(),
-    public network: "mainnet" | "testnet" = "mainnet",
-    public services: OneSatServices
+    public owners,
+    public network: "mainnet" | "testnet",
+    public services: OneSatServices,
   ) {
     super(owners, network);
   }
@@ -49,14 +49,23 @@ export class Bsv21Indexer extends Indexer {
   async parse(
     ctx: ParseContext,
     vout: number,
-    _isBroadcasted: boolean
+    _isBroadcasted: boolean,
   ): Promise<IndexData | undefined> {
     const txo = ctx.txos[vout];
-    const insc = txo.data.insc?.data as { file?: { type: string; content: number[] } };
+    const insc = txo.data.insc?.data as {
+      file?: { type: string; content: number[] };
+    };
 
     if (!insc || insc.file?.type !== "application/bsv-20") return;
 
-    let json: { op: string; amt?: string; dec?: string; sym?: string; icon?: string; id?: string };
+    let json: {
+      op: string;
+      amt?: string;
+      dec?: string;
+      sym?: string;
+      icon?: string;
+      id?: string;
+    };
     let bsv21: Partial<Bsv21>;
     try {
       const content = insc.file?.content;
@@ -148,10 +157,10 @@ export class Bsv21Indexer extends Indexer {
       try {
         const overlayData = await this.services.getBsv21TokenByTxid(
           tokenData.id,
-          spend.outpoint.txid
+          spend.outpoint.txid,
         );
         const outputData = overlayData.outputs.find(
-          (o) => o.vout === spend.outpoint.vout
+          (o) => o.vout === spend.outpoint.vout,
         );
         const bsv21OverlayData = outputData?.data.bsv21;
 
@@ -245,7 +254,7 @@ export class Bsv21Indexer extends Indexer {
     if (summaryToken?.sym) {
       return {
         id: summaryToken.sym,
-        amount: summaryBalance / Math.pow(10, summaryToken.dec || 0),
+        amount: summaryBalance / 10 ** (summaryToken.dec || 0),
         icon: summaryToken.icon,
       };
     }
