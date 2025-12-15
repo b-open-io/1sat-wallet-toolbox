@@ -1,6 +1,6 @@
 import { Transaction } from "@bsv/sdk";
 import type { Indexer, ParseContext, Txo } from "./types";
-import type { OneSatServices } from "../services/OneSatServices";
+import type { OneSatServices, ParsedOutputInfo } from "../services/OneSatServices";
 import { Outpoint } from "./Outpoint";
 
 /**
@@ -18,6 +18,8 @@ export interface ParsedOutput {
  */
 export interface ParseResult {
   outputs: ParsedOutput[];
+  /** Detailed info for all outputs (for debugging/feedback) */
+  outputDetails: ParsedOutputInfo[];
   summary?: unknown;
 }
 
@@ -169,13 +171,9 @@ export class TransactionParser {
    */
   private convertToWalletToolboxFormat(ctx: ParseContext): ParseResult {
     const outputs: ParsedOutput[] = [];
+    const outputDetails: ParsedOutputInfo[] = [];
 
     for (const txo of ctx.txos) {
-      // Filter: only include outputs we own
-      if (!txo.owner || !this.owners.has(txo.owner)) {
-        continue;
-      }
-
       // Collect tags from all indexer data
       const tags: string[] = [];
       for (const indexData of Object.values(txo.data)) {
@@ -184,17 +182,44 @@ export class TransactionParser {
         }
       }
 
-      outputs.push({
+      // Determine if output should be included and why not
+      let included = true;
+      let excludeReason: string | undefined;
+
+      if (!txo.owner) {
+        included = false;
+        excludeReason = "no owner set by indexers";
+      } else if (!this.owners.has(txo.owner)) {
+        included = false;
+        excludeReason = `owner ${txo.owner} not in owners set`;
+      }
+
+      // Build detailed info for this output
+      outputDetails.push({
         vout: txo.outpoint.vout,
-        basket: txo.basket || "",
+        owner: txo.owner,
+        basket: txo.basket,
         tags,
-        customInstructions:
-          Object.keys(txo.data).length > 0 ? txo.data : undefined,
+        indexerData: txo.data,
+        included,
+        excludeReason,
       });
+
+      // Only include owned outputs in the actual result
+      if (included) {
+        outputs.push({
+          vout: txo.outpoint.vout,
+          basket: txo.basket || "",
+          tags,
+          customInstructions:
+            Object.keys(txo.data).length > 0 ? txo.data : undefined,
+        });
+      }
     }
 
     return {
       outputs,
+      outputDetails,
       summary: Object.keys(ctx.summary).length > 0 ? ctx.summary : undefined,
     };
   }

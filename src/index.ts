@@ -4,17 +4,14 @@ if (typeof globalThis.Buffer === "undefined") {
   (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 }
 
+export { OneSatWallet, type OneSatWalletArgs, type IngestResult } from "./OneSatWallet";
+export { type ParseResult, type ParsedOutput } from "./indexers/TransactionParser";
 export {
-  OneSatWallet,
-  type OneSatWalletArgs,
-  type OneSatWalletEvents,
-  type SyncStartEvent,
-  type SyncProgressEvent,
-  type SyncTxEvent,
-  type SyncErrorEvent,
-  type SyncCompleteEvent,
-} from "./OneSatWallet";
-export { OneSatServices, type OrdfsMetadata } from "./services/OneSatServices";
+  OneSatServices,
+  type OrdfsMetadata,
+  type SyncOutput,
+  type OneSatServicesEvents,
+} from "./services/OneSatServices";
 export { ReadOnlySigner } from "./signers/ReadOnlySigner";
 
 // Indexers

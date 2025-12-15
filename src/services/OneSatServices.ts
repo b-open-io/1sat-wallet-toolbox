@@ -19,6 +19,34 @@ import { WalletError } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletError"
 import type { TableOutput } from "@bsv/wallet-toolbox/mobile/out/src/storage/schema/tables/TableOutput";
 import type { Bsv21TransactionData } from "../indexers/types";
 
+export interface SyncOutput {
+  outpoint: string;
+  score: number;
+  spendTxid?: string;
+}
+
+export interface ParsedOutputInfo {
+  vout: number;
+  owner?: string;
+  basket?: string;
+  tags: string[];
+  indexerData: { [tag: string]: unknown };
+  included: boolean;
+  excludeReason?: string;
+}
+
+export interface OneSatServicesEvents {
+  "sync:start": { address: string; fromScore: number };
+  "sync:output": { address: string; output: SyncOutput };
+  "sync:skipped": { address: string; outpoint: string; reason: string };
+  "sync:parsed": { address: string; txid: string; outputs: ParsedOutputInfo[]; internalizedCount: number };
+  "sync:error": { address: string; error: Error };
+  "sync:complete": { address: string };
+}
+
+type SyncOutputHandler = (address: string, output: SyncOutput) => Promise<void>;
+type EventCallback<T> = (event: T) => void;
+
 /**
  * OrdFS metadata response structure
  */
@@ -50,42 +78,165 @@ export interface Bsv21TokenDetails {
 /**
  * WalletServices implementation for 1Sat ecosystem.
  *
- * Data sources:
- * - ordfs-server - Block headers, merkle proofs, raw transactions
- * - OneSat API - Transaction broadcasting
+ * Uses the unified 1Sat API at api.1sat.app for:
+ * - Block headers and chain tracking (/block/*)
+ * - Raw transactions and proofs (/tx/*)
+ * - Transaction broadcasting (/arc/*)
+ * - BSV21 token data (/bsv21/*)
+ * - Transaction outputs (/txo/*)
  */
 export class OneSatServices implements WalletServices {
   chain: Chain;
-  private ordfsBaseUrl: string;
-  readonly onesatBaseUrl: string;
+  readonly baseUrl: string;
   private bsv21TokenCache = new Map<string, Bsv21TokenDetails>();
   private chainTracker: ChainTracker | null = null;
   private storage?: WalletStorageManager;
+  private activeSyncs = new Map<string, EventSource>();
+  private syncHandlers = new Map<string, SyncOutputHandler>();
+  private listeners: {
+    [K in keyof OneSatServicesEvents]?: Set<EventCallback<OneSatServicesEvents[K]>>;
+  } = {};
 
-  constructor(chain: Chain, ordfsUrl?: string, onesatUrl?: string, storage?: WalletStorageManager) {
+  constructor(chain: Chain, baseUrl?: string, storage?: WalletStorageManager) {
     this.chain = chain;
-    this.ordfsBaseUrl = ordfsUrl || "https://ordfs.network";
-    this.onesatBaseUrl = onesatUrl || (
+    this.baseUrl = baseUrl || (
       chain === "main"
-        ? "https://ordinals.1sat.app"
-        : "https://testnet.ordinals.gorillapool.io"
+        ? "https://api.1sat.app"
+        : "https://testnet.api.1sat.app"
     );
     this.storage = storage;
+  }
+
+  on<K extends keyof OneSatServicesEvents>(
+    event: K,
+    callback: EventCallback<OneSatServicesEvents[K]>
+  ): void {
+    if (!this.listeners[event]) {
+      (this.listeners as Record<K, Set<EventCallback<OneSatServicesEvents[K]>>>)[event] = new Set();
+    }
+    (this.listeners[event] as Set<EventCallback<OneSatServicesEvents[K]>>).add(callback);
+  }
+
+  off<K extends keyof OneSatServicesEvents>(
+    event: K,
+    callback: EventCallback<OneSatServicesEvents[K]>
+  ): void {
+    (this.listeners[event] as Set<EventCallback<OneSatServicesEvents[K]>> | undefined)?.delete(callback);
+  }
+
+  emit<K extends keyof OneSatServicesEvents>(
+    event: K,
+    data: OneSatServicesEvents[K]
+  ): void {
+    for (const cb of this.listeners[event] ?? []) {
+      cb(data);
+    }
+  }
+
+  private getSyncStorageKey(address: string): string {
+    return `1sat:sync:${address}`;
+  }
+
+  getSyncProgress(address: string): number {
+    return Number(localStorage.getItem(this.getSyncStorageKey(address)) || "0");
+  }
+
+  private setSyncProgress(address: string, score: number): void {
+    localStorage.setItem(this.getSyncStorageKey(address), score.toString());
+  }
+
+  syncAddress(address: string, handler: SyncOutputHandler): void {
+    this.stopSync(address);
+
+    const from = this.getSyncProgress(address);
+    this.syncHandlers.set(address, handler);
+    this.emit("sync:start", { address, fromScore: from });
+
+    const url = `${this.baseUrl}/owner/${address}/sync/stream?from=${from}`;
+    const eventSource = new EventSource(url);
+    this.activeSyncs.set(address, eventSource);
+
+    const cleanup = () => {
+      eventSource.close();
+      this.activeSyncs.delete(address);
+      this.syncHandlers.delete(address);
+    };
+
+    eventSource.onmessage = async (event) => {
+      const output: SyncOutput = JSON.parse(event.data);
+      const currentHandler = this.syncHandlers.get(address);
+
+      this.emit("sync:output", { address, output });
+
+      if (currentHandler) {
+        try {
+          await currentHandler(address, output);
+          this.setSyncProgress(address, output.score);
+        } catch (error) {
+          // Handler threw - don't update progress, emit error
+          this.emit("sync:error", {
+            address,
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      } else {
+        // No handler, just update progress
+        this.setSyncProgress(address, output.score);
+      }
+    };
+
+    eventSource.addEventListener("done", () => {
+      cleanup();
+      this.emit("sync:complete", { address });
+    });
+
+    eventSource.addEventListener("error", () => {
+      cleanup();
+      this.emit("sync:error", { address, error: new Error("SSE connection error") });
+    });
+
+    eventSource.onerror = () => {
+      if (eventSource.readyState === EventSource.CLOSED) {
+        cleanup();
+        this.emit("sync:error", { address, error: new Error("SSE connection closed") });
+      }
+    };
+  }
+
+  stopSync(address: string): void {
+    const eventSource = this.activeSyncs.get(address);
+    if (eventSource) {
+      eventSource.close();
+      this.activeSyncs.delete(address);
+      this.syncHandlers.delete(address);
+    }
+  }
+
+  isSyncing(address: string): boolean {
+    return this.activeSyncs.has(address);
+  }
+
+  close(): void {
+    for (const eventSource of this.activeSyncs.values()) {
+      eventSource.close();
+    }
+    this.activeSyncs.clear();
+    this.syncHandlers.clear();
   }
 
   async getChainTracker(): Promise<ChainTracker> {
     if (this.chainTracker) return this.chainTracker;
 
-    const baseUrl = this.onesatBaseUrl;
+    const baseUrl = this.baseUrl;
     this.chainTracker = {
       currentHeight: async (): Promise<number> => {
-        const resp = await fetch(`${baseUrl}/chaintracks/tip`);
+        const resp = await fetch(`${baseUrl}/block/tip`);
         if (!resp.ok) throw new Error(`Failed to fetch tip: ${resp.status}`);
         const data = await resp.json();
         return data.height;
       },
       isValidRootForHeight: async (root: string, height: number): Promise<boolean> => {
-        const resp = await fetch(`${baseUrl}/chaintracks/header/height/${height}`);
+        const resp = await fetch(`${baseUrl}/block/header/height/${height}`);
         if (!resp.ok) return false;
         const data = await resp.json();
         return data.merkleRoot === root;
@@ -95,7 +246,7 @@ export class OneSatServices implements WalletServices {
   }
 
   async getHeaderForHeight(height: number): Promise<number[]> {
-    const resp = await fetch(`${this.onesatBaseUrl}/chaintracks/headers?height=${height}&count=1`);
+    const resp = await fetch(`${this.baseUrl}/block/headers?height=${height}&count=1`);
     if (!resp.ok) {
       throw new Error(`Failed to fetch header for height ${height}: ${resp.statusText}`);
     }
@@ -104,7 +255,7 @@ export class OneSatServices implements WalletServices {
   }
 
   async getHeight(): Promise<number> {
-    const resp = await fetch(`${this.onesatBaseUrl}/chaintracks/height`);
+    const resp = await fetch(`${this.baseUrl}/block/height`);
     if (!resp.ok) {
       throw new Error(`Failed to fetch chain height: ${resp.statusText}`);
     }
@@ -140,7 +291,7 @@ export class OneSatServices implements WalletServices {
 
     // Fetch from network
     try {
-      const resp = await fetch(`${this.ordfsBaseUrl}/v2/tx/${txid}`);
+      const resp = await fetch(`${this.baseUrl}/tx/${txid}`);
       if (!resp.ok) {
         return {
           txid,
@@ -151,7 +302,7 @@ export class OneSatServices implements WalletServices {
       const rawTx = Array.from(new Uint8Array(arrayBuffer));
       return {
         txid,
-        name: "ordfs-server",
+        name: "1sat-api",
         rawTx,
       };
     } catch (error) {
@@ -167,10 +318,10 @@ export class OneSatServices implements WalletServices {
 
   async getMerklePath(txid: string, _useNext?: boolean): Promise<GetMerklePathResult> {
     try {
-      const resp = await fetch(`${this.ordfsBaseUrl}/v2/tx/${txid}/proof`);
+      const resp = await fetch(`${this.baseUrl}/tx/${txid}/proof`);
       if (!resp.ok) {
         return {
-          name: "ordfs-server",
+          name: "1sat-api",
           error: new WalletError("FETCH_FAILED", `Failed to fetch merkle proof: ${resp.statusText}`),
         };
       }
@@ -179,12 +330,12 @@ export class OneSatServices implements WalletServices {
       const merklePath = MerklePath.fromBinary(proofBytes);
 
       return {
-        name: "ordfs-server",
+        name: "1sat-api",
         merklePath,
       };
     } catch (error) {
       return {
-        name: "ordfs-server",
+        name: "1sat-api",
         error: new WalletError(
           "NETWORK_ERROR",
           error instanceof Error ? error.message : "Unknown error"
@@ -201,7 +352,7 @@ export class OneSatServices implements WalletServices {
         const beefTx = beef.findTxid(txid);
         if (!beefTx?.tx) {
           results.push({
-            name: "onesat-api",
+            name: "1sat-api",
             status: "error",
             error: new WalletError("TX_NOT_FOUND", `Transaction ${txid} not found in BEEF`),
             txidResults: [
@@ -215,7 +366,7 @@ export class OneSatServices implements WalletServices {
           continue;
         }
 
-        const resp = await fetch(`${this.onesatBaseUrl}/v5/tx`, {
+        const resp = await fetch(`${this.baseUrl}/arc/tx`, {
           method: "POST",
           headers: {
             "Content-Type": "application/octet-stream",
@@ -227,7 +378,7 @@ export class OneSatServices implements WalletServices {
 
         if (resp.status === 200) {
           results.push({
-            name: "onesat-api",
+            name: "1sat-api",
             status: "success",
             txidResults: [
               {
@@ -238,7 +389,7 @@ export class OneSatServices implements WalletServices {
           });
         } else {
           results.push({
-            name: "onesat-api",
+            name: "1sat-api",
             status: "error",
             error: new WalletError(resp.status.toString(), body.error || resp.statusText),
             txidResults: [
@@ -317,7 +468,7 @@ export class OneSatServices implements WalletServices {
     }
 
     // Fetch from network
-    const resp = await fetch(`${this.onesatBaseUrl}/v5/tx/${txid}/beef`);
+    const resp = await fetch(`${this.baseUrl}/tx/${txid}/beef`);
     if (!resp.ok) {
       throw new Error(`Failed to fetch BEEF for txid ${txid}: ${resp.statusText}`);
     }
@@ -335,11 +486,9 @@ export class OneSatServices implements WalletServices {
    * @throws {HttpError} on HTTP errors (check status for specifics)
    */
   async getOrdfsMetadata(outpoint: string): Promise<OrdfsMetadata> {
-    const resp = await fetch(
-      `${this.ordfsBaseUrl}/v2/metadata/${outpoint}?map=true&parent=true`
-    );
+    const resp = await fetch(`${this.baseUrl}/ordfs/metadata/${outpoint}`);
     if (!resp.ok) {
-      throw new HttpError(resp.status, `OrdFS metadata fetch failed: ${resp.statusText}`);
+      throw new HttpError(resp.status, `TXO metadata fetch failed: ${resp.statusText}`);
     }
     return await resp.json();
   }
@@ -352,7 +501,7 @@ export class OneSatServices implements WalletServices {
     _tokenId: string,
     txid: string
   ): Promise<Bsv21TransactionData> {
-    const resp = await fetch(`${this.onesatBaseUrl}/api/bsv21/tx/${txid}`);
+    const resp = await fetch(`${this.baseUrl}/bsv21/tx/${txid}`);
     if (!resp.ok) {
       throw new HttpError(resp.status, `BSV21 token fetch failed: ${resp.statusText}`);
     }
@@ -368,7 +517,7 @@ export class OneSatServices implements WalletServices {
     const cached = this.bsv21TokenCache.get(tokenId);
     if (cached) return cached;
 
-    const resp = await fetch(`${this.onesatBaseUrl}/api/1sat/bsv21/${tokenId}`);
+    const resp = await fetch(`${this.baseUrl}/bsv21/token/${tokenId}`);
     if (!resp.ok) {
       throw new HttpError(resp.status, `BSV21 token details fetch failed: ${resp.statusText}`);
     }

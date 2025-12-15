@@ -8,6 +8,7 @@ import type { Inscription } from "./InscriptionIndexer";
 import type { Sigma } from "./SigmaIndexer";
 import type { OneSatServices } from "../services/OneSatServices";
 import { HttpError } from "../errors";
+import { parseAddress } from "./parseAddress";
 
 export interface Origin {
   outpoint?: string;
@@ -36,6 +37,13 @@ export class OriginIndexer extends Indexer {
     if (txo.satoshis !== 1n) return;
     const insc = txo.data.insc?.data as Inscription | undefined;
     if (insc?.file?.type === "application/bsv-20") return;
+
+    // Parse the address and set owner if it's in our owners set
+    const script = ctx.tx.outputs[vout].lockingScript;
+    const address = parseAddress(script, 0, this.network);
+    if (address && this.owners.has(address)) {
+      txo.owner = address;
+    }
 
     // Calculate the satoshi position for this output
     let outSat = 0n;
