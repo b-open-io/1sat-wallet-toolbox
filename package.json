@@ -1,6 +1,20 @@
 {
-  "name": "1sat-wallet-toolbox",
+  "name": "@1sat/wallet-toolbox",
   "version": "0.0.1",
+  "description": "BSV wallet library extending @bsv/wallet-toolbox with 1Sat Ordinals protocol support",
+  "author": "1Sat Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/b-open-io/1sat-wallet-toolbox.git"
+  },
+  "keywords": [
+    "bsv",
+    "bitcoin",
+    "ordinals",
+    "1sat",
+    "wallet"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,13 +35,13 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@bsv/sdk": "^1.1.25",
+    "@bsv/sdk": "^1.9.24",
     "@bsv/wallet-toolbox": "^1.7.14",
     "buffer": "^6.0.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@types/bun": "^1.1.14",
-    "typescript": "^5.7.2"
+    "@types/bun": "^1.3.4",
+    "typescript": "^5.9.3"
   }
 }

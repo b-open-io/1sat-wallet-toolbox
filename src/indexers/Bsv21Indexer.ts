@@ -39,7 +39,7 @@ export class Bsv21Indexer extends Indexer {
   name = "BSV21 Tokens";
 
   constructor(
-    public owners,
+    public owners: Set<string>,
     public network: "mainnet" | "testnet",
     public services: OneSatServices,
   ) {

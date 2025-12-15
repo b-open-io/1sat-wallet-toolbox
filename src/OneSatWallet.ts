@@ -25,7 +25,6 @@ import {
 import type { Indexer } from "./indexers/types";
 import {
   OneSatServices,
-  type OneSatServicesEvents,
   type ParsedOutputInfo,
   type SyncOutput,
 } from "./services/OneSatServices";

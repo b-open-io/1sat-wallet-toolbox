@@ -23,7 +23,7 @@ export class OriginIndexer extends Indexer {
   name = "Origins";
 
   constructor(
-    public owners,
+    public owners: Set<string>,
     public network: "mainnet" | "testnet",
     private services: OneSatServices,
   ) {
