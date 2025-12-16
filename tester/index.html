@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>1Sat Wallet Sync Tester</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>1Sat Wallet Sync Tester</h1>
+      </header>
+
+      <main>
+        <section class="config-section">
+          <h2>Configuration</h2>
+          <div class="form-group">
+            <label for="indexer-url">1Sat API URL</label>
+            <input type="text" id="indexer-url" value="http://localhost:8080/api" placeholder="http://localhost:8080/api" draggable="false" />
+          </div>
+          <div class="form-group">
+            <label for="chain">Chain</label>
+            <select id="chain">
+              <option value="main">Mainnet</option>
+              <option value="test">Testnet</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="sync-section">
+          <h2>Sync Address</h2>
+          <div class="form-group">
+            <label for="address">Address to Sync</label>
+            <input type="text" id="address" placeholder="Enter BSV address..." draggable="false" />
+          </div>
+          <div class="button-group">
+            <button id="sync-btn" class="primary">Sync</button>
+            <button id="stop-btn" class="danger" disabled>Stop</button>
+            <button id="resync-btn" class="warning">Full Resync</button>
+            <button id="reset-progress-btn">Reset Progress</button>
+            <button id="clear-storage-btn" class="danger">Clear All</button>
+          </div>
+          <div id="sync-progress-info" class="progress-info"></div>
+        </section>
+
+        <section class="parse-section">
+          <h2>Parse Single Transaction</h2>
+          <div class="form-group">
+            <label for="txid">Transaction ID</label>
+            <input type="text" id="txid" placeholder="Enter txid to parse..." draggable="false" />
+          </div>
+          <div class="button-group">
+            <button id="parse-tx-btn" class="primary">Parse TX</button>
+          </div>
+        </section>
+
+        <section class="status-section">
+          <h2>Sync Status</h2>
+          <div id="status" class="status-box">
+            Ready to sync...
+          </div>
+          <div class="progress-container">
+            <div id="progress-bar" class="progress-bar"></div>
+          </div>
+          <div id="progress-text" class="progress-text"></div>
+        </section>
+
+        <section class="logs-section">
+          <h2>Sync Log</h2>
+          <div id="logs" class="logs-box"></div>
+        </section>
+
+        <section class="data-section">
+          <h2>Wallet Data</h2>
+          <div class="button-group">
+            <button id="list-outputs-btn">List Outputs</button>
+            <button id="list-actions-btn">List Actions</button>
+            <button id="show-baskets-btn">Show Baskets</button>
+          </div>
+          <div id="data-display" class="data-box">
+            <p class="placeholder">Click a button above to view wallet data</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/dist/entry.js"></script>
+  </body>
+</html>

@@ -13,7 +13,6 @@ export interface ParsedOutput {
   vout: number;
   basket: string;
   tags: string[];
-  customInstructions?: unknown;
 }
 
 /**
@@ -214,8 +213,6 @@ export class TransactionParser {
           vout: txo.outpoint.vout,
           basket: txo.basket || "",
           tags,
-          customInstructions:
-            Object.keys(txo.data).length > 0 ? txo.data : undefined,
         });
       }
     }

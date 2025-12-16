@@ -197,6 +197,11 @@ export class OriginIndexer extends Indexer {
             icon = origin?.outpoint;
           }
         }
+        // Clear file content before saving - content is loaded locally but shouldn't be persisted
+        const origin = txo.data[this.tag].data as Origin;
+        if (origin?.insc?.file) {
+          origin.insc.file.content = [];
+        }
       }
     }
 

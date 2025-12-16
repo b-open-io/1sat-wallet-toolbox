@@ -1,7 +1,6 @@
 import { OP, Script, Utils } from "@bsv/sdk";
+import { MAP_PREFIX } from "@bsv/templates";
 import { type IndexData, Indexer, type ParseContext } from "./types";
-
-export const MAP_PROTO = "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5";
 
 export class MapIndexer extends Indexer {
   tag = "map";
@@ -26,7 +25,7 @@ export class MapIndexer extends Indexer {
 
     let chunks = Script.fromBinary(script.chunks[retPos].data).chunks;
     while (chunks.length) {
-      if (Utils.toUTF8(chunks[0]?.data || []) === MAP_PROTO) {
+      if (Utils.toUTF8(chunks[0]?.data || []) === MAP_PREFIX) {
         const map = MapIndexer.parseMap(new Script(chunks), 1);
         return map ? { data: map, tags: [] } : undefined;
       }

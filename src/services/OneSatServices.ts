@@ -59,6 +59,7 @@ export interface OneSatServicesEvents {
 type SyncOutputHandler = (address: string, output: SyncOutput) => Promise<void>;
 type EventCallback<T> = (event: T) => void;
 
+
 /**
  * OrdFS metadata response structure
  */
@@ -91,7 +92,7 @@ export interface Bsv21TokenDetails {
  *
  * Uses the unified 1Sat API at api.1sat.app for:
  * - Block headers and chain tracking (/block/*)
- * - Raw transactions and proofs (/tx/*)
+ * - Raw transactions and proofs (/beef/*)
  * - Transaction broadcasting (/arc/*)
  * - BSV21 token data (/bsv21/*)
  * - Transaction outputs (/txo/*)
@@ -103,7 +104,6 @@ export class OneSatServices implements WalletServices {
   private chainTracker: ChainTracker | null = null;
   private storage?: WalletStorageManager;
   private activeSyncs = new Map<string, EventSource>();
-  private syncHandlers = new Map<string, SyncOutputHandler>();
   private listeners: {
     [K in keyof OneSatServicesEvents]?: Set<
       EventCallback<OneSatServicesEvents[K]>
@@ -170,63 +170,63 @@ export class OneSatServices implements WalletServices {
     this.stopSync(address);
 
     const from = this.getSyncProgress(address);
-    this.syncHandlers.set(address, handler);
     this.emit("sync:start", { address, fromScore: from });
 
-    const url = `${this.baseUrl}/owner/${address}/sync/stream?from=${from}`;
+    const queue: SyncOutput[] = [];
+    let processing = false;
+    let done = false;
+
+    const url = `${this.baseUrl}/own/${address}/sync?from=${from}`;
     const eventSource = new EventSource(url);
     this.activeSyncs.set(address, eventSource);
 
-    const cleanup = () => {
-      eventSource.close();
-      this.activeSyncs.delete(address);
-      this.syncHandlers.delete(address);
-    };
+    const processQueue = async () => {
+      if (processing) return;
+      processing = true;
 
-    eventSource.onmessage = async (event) => {
-      const output: SyncOutput = JSON.parse(event.data);
-      const currentHandler = this.syncHandlers.get(address);
-
-      this.emit("sync:output", { address, output });
-
-      if (currentHandler) {
+      while (queue.length > 0) {
+        if (!this.activeSyncs.has(address)) return; // stopped
+        const output = queue.shift()!;
         try {
-          await currentHandler(address, output);
+          this.emit("sync:output", { address, output });
+          await handler(address, output);
           this.setSyncProgress(address, output.score);
         } catch (error) {
-          // Handler threw - don't update progress, emit error
+          this.activeSyncs.delete(address);
           this.emit("sync:error", {
             address,
             error: error instanceof Error ? error : new Error(String(error)),
           });
+          return;
         }
-      } else {
-        // No handler, just update progress
-        this.setSyncProgress(address, output.score);
+      }
+
+      processing = false;
+
+      if (done) {
+        this.activeSyncs.delete(address);
+        this.emit("sync:complete", { address });
       }
     };
 
+    eventSource.onmessage = (event) => {
+      queue.push(JSON.parse(event.data));
+      processQueue();
+    };
+
     eventSource.addEventListener("done", () => {
-      cleanup();
-      this.emit("sync:complete", { address });
+      eventSource.close();
+      done = true;
+      processQueue();
     });
 
-    eventSource.addEventListener("error", () => {
-      cleanup();
+    eventSource.onerror = () => {
+      eventSource.close();
+      this.activeSyncs.delete(address);
       this.emit("sync:error", {
         address,
         error: new Error("SSE connection error"),
       });
-    });
-
-    eventSource.onerror = () => {
-      if (eventSource.readyState === EventSource.CLOSED) {
-        cleanup();
-        this.emit("sync:error", {
-          address,
-          error: new Error("SSE connection closed"),
-        });
-      }
     };
   }
 
@@ -235,12 +235,7 @@ export class OneSatServices implements WalletServices {
     if (eventSource) {
       eventSource.close();
       this.activeSyncs.delete(address);
-      this.syncHandlers.delete(address);
     }
-  }
-
-  isSyncing(address: string): boolean {
-    return this.activeSyncs.has(address);
   }
 
   close(): void {
@@ -248,7 +243,6 @@ export class OneSatServices implements WalletServices {
       eventSource.close();
     }
     this.activeSyncs.clear();
-    this.syncHandlers.clear();
   }
 
   async getChainTracker(): Promise<ChainTracker> {
@@ -325,7 +319,7 @@ export class OneSatServices implements WalletServices {
 
     // Fetch from network
     try {
-      const resp = await fetch(`${this.baseUrl}/tx/${txid}`);
+      const resp = await fetch(`${this.baseUrl}/beef/${txid}/raw`);
       if (!resp.ok) {
         return {
           txid,
@@ -358,7 +352,7 @@ export class OneSatServices implements WalletServices {
     _useNext?: boolean,
   ): Promise<GetMerklePathResult> {
     try {
-      const resp = await fetch(`${this.baseUrl}/tx/${txid}/proof`);
+      const resp = await fetch(`${this.baseUrl}/beef/${txid}/proof`);
       if (!resp.ok) {
         return {
           name: "1sat-api",
@@ -525,7 +519,7 @@ export class OneSatServices implements WalletServices {
     }
 
     // Fetch from network
-    const resp = await fetch(`${this.baseUrl}/tx/${txid}/beef`);
+    const resp = await fetch(`${this.baseUrl}/beef/${txid}`);
     if (!resp.ok) {
       throw new Error(
         `Failed to fetch BEEF for txid ${txid}: ${resp.statusText}`,

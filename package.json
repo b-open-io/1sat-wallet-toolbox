@@ -32,10 +32,13 @@
     "dev": "tsc --watch",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
-    "test": "bun test"
+    "test": "bun test",
+    "tester:build": "bun build ./tester/src/entry.ts --outdir ./tester/dist --target browser --splitting --define 'process.env={}' --define 'global=globalThis' --sourcemap=inline",
+    "tester": "bun run build && bun run tester:build && bun ./tester/server.ts"
   },
   "dependencies": {
     "@bsv/sdk": "^1.9.24",
+    "@bsv/templates": "file:../ts-templates",
     "@bsv/wallet-toolbox": "^1.7.14",
     "buffer": "^6.0.3"
   },

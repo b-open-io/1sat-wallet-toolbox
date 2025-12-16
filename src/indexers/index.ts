@@ -21,12 +21,12 @@ export {
   type Inscription,
 } from "./InscriptionIndexer";
 export { SigmaIndexer, type Sigma } from "./SigmaIndexer";
-export { MapIndexer, MAP_PROTO } from "./MapIndexer";
+export { MapIndexer } from "./MapIndexer";
 export { OriginIndexer, type Origin } from "./OriginIndexer";
 export { Bsv21Indexer, deriveFundAddress, type Bsv21 } from "./Bsv21Indexer";
 export { OrdLockIndexer, Listing } from "./OrdLockIndexer";
 export { OpNSIndexer } from "./OpNSIndexer";
-export { CosignIndexer, type Cosign } from "./CosignIndexer";
+export { CosignIndexer, type CosignData } from "./CosignIndexer";
 
 export {
   TransactionParser,

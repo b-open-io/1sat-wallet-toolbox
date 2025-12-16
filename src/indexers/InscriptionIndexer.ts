@@ -1,7 +1,8 @@
-import { Hash, OP, Script, Utils } from "@bsv/sdk";
+import { OP, Script, Utils } from "@bsv/sdk";
+import { Inscription as InscriptionTemplate } from "@bsv/templates";
 import { MapIndexer } from "./MapIndexer";
 import { parseAddress } from "./parseAddress";
-import { type IndexData, Indexer, type ParseContext } from "./types";
+import { type IndexData, type IndexSummary, Indexer, type ParseContext } from "./types";
 
 export interface File {
   hash: string;
@@ -41,85 +42,65 @@ export class InscriptionIndexer extends Indexer {
     if (txo.satoshis !== 1n) return;
 
     const script = ctx.tx.outputs[vout].lockingScript;
-    let fromPos: number | undefined;
 
-    for (let i = 0; i < script.chunks.length; i++) {
-      const chunk = script.chunks[i];
-      if (
-        i >= 2 &&
-        chunk.data?.length === 3 &&
-        Utils.toUTF8(chunk.data) === "ord" &&
-        script.chunks[i - 1].op === OP.OP_IF &&
-        script.chunks[i - 2].op === OP.OP_FALSE
-      ) {
-        fromPos = i + 1;
-        break;
+    // Use template decode
+    const decoded = InscriptionTemplate.decode(script);
+    if (!decoded) return;
+
+    // Extract owner from script prefix or suffix
+    if (!txo.owner) {
+      txo.owner = parseAddress(script, 0, this.network);
+    }
+    if (!txo.owner && decoded.scriptSuffix) {
+      // Try to find owner in suffix (after OP_ENDIF)
+      const suffixScript = Script.fromBinary(Array.from(decoded.scriptSuffix));
+      txo.owner = parseAddress(suffixScript, 0, this.network);
+      // Also check for OP_CODESEPARATOR pattern
+      if (!txo.owner && suffixScript.chunks[0]?.op === OP.OP_CODESEPARATOR) {
+        txo.owner = parseAddress(suffixScript, 1, this.network);
       }
     }
 
-    if (fromPos === undefined) return;
-
-    if (!txo.owner) txo.owner = parseAddress(script, 0, this.network);
-
-    const insc: Inscription = {
-      file: { hash: "", size: 0, type: "", content: [] },
-      fields: {},
-    };
-
-    for (let i = fromPos; i < script.chunks.length; i += 2) {
-      const field = script.chunks[i];
-      if (field.op === OP.OP_ENDIF) {
-        if (!txo.owner) txo.owner = parseAddress(script, i + 1, this.network);
-        if (!txo.owner && script.chunks[i + 1]?.op === OP.OP_CODESEPARATOR) {
-          txo.owner = parseAddress(script, i + 2, this.network);
-        }
-        break;
-      }
-      if (field.op > OP.OP_16) return;
-      const value = script.chunks[i + 1];
-      if (value.op > OP.OP_PUSHDATA4) return;
-
-      if (field.data?.length && Utils.toUTF8(field.data) === "MAP") {
-        const map = MapIndexer.parseMap(Script.fromBinary(value.data || []), 0);
+    // Handle MAP field if present (special case)
+    if (decoded.fields?.has("MAP")) {
+      const mapData = decoded.fields.get("MAP");
+      if (mapData) {
+        const map = MapIndexer.parseMap(Script.fromBinary(Array.from(mapData)), 0);
         if (map) {
           txo.data.map = { data: map, tags: [] };
         }
-        continue;
       }
+    }
 
-      let fieldNo = 0;
-      if (field.op > OP.OP_PUSHDATA4 && field.op <= OP.OP_16) {
-        fieldNo = field.op - 80;
-      } else if (field.data?.length) {
-        fieldNo = field.data[0];
+    // Convert to wallet-toolbox format
+    const insc: Inscription = {
+      file: {
+        hash: Utils.toBase64(Array.from(decoded.file.hash)),
+        size: decoded.file.size,
+        type: decoded.file.type,
+        content: Array.from(decoded.file.content),
+      },
+      fields: {},
+    };
+
+    // Convert parent outpoint to string format
+    if (decoded.parent) {
+      try {
+        const reader = new Utils.Reader(Array.from(decoded.parent));
+        const txid = Utils.toHex(reader.read(32).reverse());
+        const vout = reader.readInt32LE();
+        insc.parent = `${txid}_${vout}`;
+      } catch {
+        // Ignore parsing errors
       }
+    }
 
-      switch (fieldNo) {
-        case 0:
-          insc.file!.size = value.data?.length || 0;
-          if (!value.data?.length) break;
-          insc.file!.hash = Utils.toBase64(Hash.sha256(value.data));
-          insc.file!.content = value.data;
-          break;
-        case 1:
-          insc.file!.type = Buffer.from(value.data || []).toString();
-          break;
-        case 3:
-          if (!value.data || value.data.length !== 36) break;
-          try {
-            const reader = new Utils.Reader(value.data);
-            const txid = Utils.toHex(reader.read(32).reverse());
-            const vout = reader.readInt32LE();
-            insc.parent = `${txid}_${vout}`;
-          } catch {
-            console.log("Error parsing parent outpoint");
-          }
-          break;
-        default:
-          if (!insc.fields) insc.fields = {};
-          insc.fields[fieldNo.toString()] = value.data
-            ? Buffer.from(value.data).toString("base64")
-            : "";
+    // Convert fields to base64 strings
+    if (decoded.fields) {
+      for (const [key, value] of decoded.fields) {
+        if (key !== "MAP") {
+          insc.fields![key] = Buffer.from(value).toString("base64");
+        }
       }
     }
 
@@ -127,5 +108,16 @@ export class InscriptionIndexer extends Indexer {
       data: insc,
       tags: [],
     };
+  }
+
+  async summerize(ctx: ParseContext): Promise<IndexSummary | undefined> {
+    // Clear file content before saving - content is loaded locally but shouldn't be persisted
+    for (const txo of ctx.txos) {
+      const insc = txo.data[this.tag]?.data as Inscription | undefined;
+      if (insc?.file) {
+        insc.file.content = [];
+      }
+    }
+    return undefined;
   }
 }

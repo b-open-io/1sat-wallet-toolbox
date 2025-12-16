@@ -1,4 +1,5 @@
 import { HD, Hash, Utils } from "@bsv/sdk";
+import { BSV21 } from "@bsv/templates";
 import { HttpError } from "../errors";
 import type { OneSatServices } from "../services/OneSatServices";
 import { Outpoint } from "./Outpoint";
@@ -52,68 +53,40 @@ export class Bsv21Indexer extends Indexer {
     _isBroadcasted: boolean,
   ): Promise<IndexData | undefined> {
     const txo = ctx.txos[vout];
-    const insc = txo.data.insc?.data as {
-      file?: { type: string; content: number[] };
-    };
+    const lockingScript = ctx.tx.outputs[vout].lockingScript;
 
-    if (!insc || insc.file?.type !== "application/bsv-20") return;
-
-    let json: {
-      op: string;
-      amt?: string;
-      dec?: string;
-      sym?: string;
-      icon?: string;
-      id?: string;
-    };
-    let bsv21: Partial<Bsv21>;
-    try {
-      const content = insc.file?.content;
-      if (!content) return;
-      json = JSON.parse(Utils.toUTF8(content));
-      bsv21 = {
-        op: json.op,
-        amt: BigInt(json.amt || 0),
-        dec: Number.parseInt(json.dec || "0"),
-        sym: json.sym,
-        icon: json.icon,
-        status: "pending",
-      };
-    } catch {
-      return;
-    }
-
-    if (!bsv21.amt || bsv21.amt <= 0n || bsv21.amt > 2n ** 64n - 1n) return;
+    // Use template decode
+    const decoded = BSV21.decode(lockingScript);
+    if (!decoded) return;
 
     const outpoint = new Outpoint(ctx.txid, vout);
+    const tokenData = decoded.tokenData;
 
-    switch (bsv21.op) {
-      case "deploy+mint":
-        if (bsv21.dec! > 18) return;
-        bsv21.id = outpoint.toString();
-        bsv21.status = "valid";
-        break;
-      case "transfer":
-      case "burn":
-        if (!json.id) return;
-        bsv21.id = json.id;
-        break;
-      default:
-        return;
-    }
+    // Create indexer data structure
+    const bsv21: Bsv21 = {
+      id: tokenData.id || outpoint.toString(),
+      op: tokenData.op,
+      amt: decoded.getAmount(),
+      dec: decoded.getDecimals(),
+      sym: tokenData.sym,
+      icon: tokenData.icon,
+      status: tokenData.op === "deploy+mint" ? "valid" : "pending",
+      fundAddress: deriveFundAddress(outpoint.toBEBinary()),
+    };
 
-    bsv21.fundAddress = deriveFundAddress(outpoint.toBEBinary());
+    // Validate amount range
+    if (bsv21.amt <= 0n || bsv21.amt > 2n ** 64n - 1n) return;
 
     const tags: string[] = [];
     if (txo.owner && this.owners.has(txo.owner)) {
-      tags.push(`id:${bsv21.id!}`);
-      tags.push(`id:${bsv21.id!}:${bsv21.status}`);
+      tags.push(`id:${bsv21.id}`);
+      tags.push(`id:${bsv21.id}:${bsv21.status}`);
     }
 
     txo.basket = "bsv21";
 
     return {
-      data: bsv21 as Bsv21,
+      data: bsv21,
       tags,
     };
   }

@@ -166,16 +166,30 @@ export class OneSatWallet extends Wallet {
     txid: string,
     isBroadcasted = true,
   ): Promise<ParseResult> {
-    // Fetch the transaction
-    const beef = await this.services.getBeefBytes(txid);
-    const tx = Transaction.fromBEEF(beef);
+    // Try to get raw tx from storage first, fall back to network BEEF
+    const rawTxResult = await this.services.getRawTx(txid);
+    let tx: Transaction;
+
+    if (rawTxResult.rawTx) {
+      tx = Transaction.fromBinary(rawTxResult.rawTx);
+    } else {
+      // Fall back to fetching BEEF from network
+      const beef = await this.services.getBeefBytes(txid);
+      tx = Transaction.fromBEEF(beef);
+    }
 
     // Load source transactions for all inputs
     for (const input of tx.inputs) {
       if (!input.sourceTransaction) {
-        input.sourceTransaction = Transaction.fromBEEF(
-          await this.services.getBeefBytes(input.sourceTXID!),
-        );
+        const sourceResult = await this.services.getRawTx(input.sourceTXID!);
+        if (sourceResult.rawTx) {
+          input.sourceTransaction = Transaction.fromBinary(sourceResult.rawTx);
+        } else {
+          // Fall back to BEEF from network
+          input.sourceTransaction = Transaction.fromBEEF(
+            await this.services.getBeefBytes(input.sourceTXID!),
+          );
+        }
       }
     }
 
@@ -216,19 +230,14 @@ export class OneSatWallet extends Wallet {
 
     // Build InternalizeOutput array from parsed results
     // All synced outputs use basket insertion since we don't have derivation data
-    const outputs: InternalizeOutput[] = parseResult.outputs.map((parsed) => {
-      return {
-        outputIndex: parsed.vout,
-        protocol: "basket insertion" as const,
-        insertionRemittance: {
-          basket: parsed.basket || "default",
-          tags: parsed.tags,
-          customInstructions: parsed.customInstructions
-            ? JSON.stringify(parsed.customInstructions)
-            : undefined,
-        },
-      };
-    });
+    const outputs: InternalizeOutput[] = parseResult.outputs.map((parsed) => ({
+      outputIndex: parsed.vout,
+      protocol: "basket insertion" as const,
+      insertionRemittance: {
+        basket: parsed.basket || "default",
+        tags: parsed.tags,
+      },
+    }));
 
     // Skip if no outputs to internalize
     if (outputs.length === 0) {
@@ -294,19 +303,38 @@ export class OneSatWallet extends Wallet {
    * @param address - The address to sync
    */
   syncAddress(address: string): void {
+    // Track txids seen during this sync session to avoid redundant DB lookups
+    const seenTxids = new Set<string>();
+
     this.services.syncAddress(
       address,
       async (addr: string, output: SyncOutput) => {
-        const txid = output.outpoint.slice(0, 64);
+        const txid = output.outpoint.substring(0, 64);
 
-        const hasTx = await this.storage.runAsStorageProvider(async (sp) => {
-          const txs = await sp.findTransactions({ partial: { txid } });
-          return txs.length > 0;
+        // Check if we've already processed this txid in this session
+        if (seenTxids.has(txid)) {
+          this.services.emit("sync:skipped", {
+            address: addr,
+            outpoint: output.outpoint,
+            reason: "already processed in this session",
+          });
+          // Still need to check spend txid
+          if (output.spendTxid && !seenTxids.has(output.spendTxid)) {
+            await this.processSpendTx(addr, output, seenTxids);
+          }
+          return;
+        }
+
+        const vout = Number.parseInt(output.outpoint.substring(65), 10);
+        const hasOutput = await this.storage.runAsStorageProvider(async (sp) => {
+          const outputs = await sp.findOutputs({ partial: { txid, vout } });
+          return outputs.length > 0;
         });
 
-        if (!hasTx) {
+        if (!hasOutput) {
           if (output.spendTxid) {
-            // Already spent and we don't have the creating tx - skip
+            // Already spent and we don't have the output - skip
+            seenTxids.add(txid);
             this.services.emit("sync:skipped", {
               address: addr,
               outpoint: output.outpoint,
@@ -319,6 +347,7 @@ export class OneSatWallet extends Wallet {
           const tx = Transaction.fromBEEF(beef);
           if (tx) {
             const result = await this.ingestTransaction(tx, "1sat-sync");
+            seenTxids.add(txid);
             this.services.emit("sync:parsed", {
               address: addr,
               txid,
@@ -326,45 +355,62 @@ export class OneSatWallet extends Wallet {
               internalizedCount: result.internalizedCount,
             });
           }
-        } else if (output.spendTxid) {
-          // We have the output, check if we have the spend
-          const hasSpend = await this.storage.runAsStorageProvider(
-            async (sp) => {
-              const txs = await sp.findTransactions({
-                partial: { txid: output.spendTxid },
-              });
-              return txs.length > 0;
-            },
-          );
-
-          if (!hasSpend) {
-            const beef = await this.services.getBeefBytes(output.spendTxid);
-            const tx = Transaction.fromBEEF(beef);
-            if (tx) {
-              const result = await this.ingestTransaction(tx, "1sat-sync");
-              this.services.emit("sync:parsed", {
-                address: addr,
-                txid: output.spendTxid,
-                outputs: result.outputDetails,
-                internalizedCount: result.internalizedCount,
-              });
-            }
+        } else {
+          seenTxids.add(txid);
+          if (output.spendTxid) {
+            await this.processSpendTx(addr, output, seenTxids);
           } else {
             this.services.emit("sync:skipped", {
               address: addr,
               outpoint: output.outpoint,
-              reason: "already have spend tx in storage",
+              reason: "already have output in storage",
             });
           }
-        } else {
-          this.services.emit("sync:skipped", {
-            address: addr,
-            outpoint: output.outpoint,
-            reason: "already have tx in storage",
-          });
         }
       },
     );
+  }
+
+  /**
+   * Process a spend transaction during sync
+   */
+  private async processSpendTx(
+    addr: string,
+    output: SyncOutput,
+    seenTxids: Set<string>,
+  ): Promise<void> {
+    if (!output.spendTxid || seenTxids.has(output.spendTxid)) {
+      return;
+    }
+
+    const hasSpend = await this.storage.runAsStorageProvider(async (sp) => {
+      const txs = await sp.findTransactions({
+        partial: { txid: output.spendTxid },
+      });
+      return txs.length > 0;
+    });
+
+    if (!hasSpend) {
+      const beef = await this.services.getBeefBytes(output.spendTxid);
+      const tx = Transaction.fromBEEF(beef);
+      if (tx) {
+        const result = await this.ingestTransaction(tx, "1sat-sync");
+        seenTxids.add(output.spendTxid);
+        this.services.emit("sync:parsed", {
+          address: addr,
+          txid: output.spendTxid,
+          outputs: result.outputDetails,
+          internalizedCount: result.internalizedCount,
+        });
+      }
+    } else {
+      seenTxids.add(output.spendTxid); // Already in DB
+      this.services.emit("sync:skipped", {
+        address: addr,
+        outpoint: output.outpoint,
+        reason: "already have spend tx in storage",
+      });
+    }
   }
 
   /**
@@ -372,13 +418,6 @@ export class OneSatWallet extends Wallet {
    */
   stopSync(address: string): void {
     this.services.stopSync(address);
-  }
-
-  /**
-   * Check if an address is currently syncing.
-   */
-  isSyncing(address: string): boolean {
-    return this.services.isSyncing(address);
   }
 
   /**
