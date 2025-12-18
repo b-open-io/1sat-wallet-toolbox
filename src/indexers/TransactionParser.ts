@@ -1,29 +1,7 @@
 import { Transaction } from "@bsv/sdk";
-import type {
-  OneSatServices,
-  ParsedOutputInfo,
-} from "../services/OneSatServices";
+import type { OneSatServices } from "../services/OneSatServices";
 import { Outpoint } from "./Outpoint";
 import type { Indexer, ParseContext, Txo } from "./types";
-
-/**
- * Represents the result of parsing a single output
- */
-export interface ParsedOutput {
-  vout: number;
-  basket: string;
-  tags: string[];
-}
-
-/**
- * Represents the result of parsing an entire transaction
- */
-export interface ParseResult {
-  outputs: ParsedOutput[];
-  /** Detailed info for all outputs (for debugging/feedback) */
-  outputDetails: ParsedOutputInfo[];
-  summary?: unknown;
-}
 
 /**
  * TransactionParser runs indexers over a transaction to extract
@@ -40,9 +18,9 @@ export class TransactionParser {
   ) {}
 
   /**
-   * Parse a transaction and extract wallet-toolbox metadata
+   * Parse a transaction and return the ParseContext with all indexer data
    */
-  async parse(tx: Transaction, isBroadcasted: boolean): Promise<ParseResult> {
+  async parse(tx: Transaction, isBroadcasted: boolean): Promise<ParseContext> {
     const ctx = this.buildContext(tx);
 
     // Load source transactions for all inputs
@@ -69,7 +47,7 @@ export class TransactionParser {
       }
     }
 
-    return this.convertToWalletToolboxFormat(ctx);
+    return ctx;
   }
 
   /**
@@ -164,63 +142,6 @@ export class TransactionParser {
       spends: [],
       summary: {},
       indexers: this.indexers,
-    };
-  }
-
-  /**
-   * Convert parsed context to wallet-toolbox format with baskets and tags
-   * Filters outputs to only return those owned by addresses in the owners set
-   */
-  private convertToWalletToolboxFormat(ctx: ParseContext): ParseResult {
-    const outputs: ParsedOutput[] = [];
-    const outputDetails: ParsedOutputInfo[] = [];
-
-    for (const txo of ctx.txos) {
-      // Collect tags from all indexer data
-      const tags: string[] = [];
-      for (const indexData of Object.values(txo.data)) {
-        if (indexData.tags) {
-          tags.push(...indexData.tags);
-        }
-      }
-
-      // Determine if output should be included and why not
-      let included = true;
-      let excludeReason: string | undefined;
-
-      if (!txo.owner) {
-        included = false;
-        excludeReason = "no owner set by indexers";
-      } else if (!this.owners.has(txo.owner)) {
-        included = false;
-        excludeReason = `owner ${txo.owner} not in owners set`;
-      }
-
-      // Build detailed info for this output
-      outputDetails.push({
-        vout: txo.outpoint.vout,
-        owner: txo.owner,
-        basket: txo.basket,
-        tags,
-        indexerData: txo.data,
-        included,
-        excludeReason,
-      });
-
-      // Only include owned outputs in the actual result
-      if (included) {
-        outputs.push({
-          vout: txo.outpoint.vout,
-          basket: txo.basket || "",
-          tags,
-        });
-      }
-    }
-
-    return {
-      outputs,
-      outputDetails,
-      summary: Object.keys(ctx.summary).length > 0 ? ctx.summary : undefined,
     };
   }
 }

@@ -2,7 +2,12 @@ import { OP, Script, Utils } from "@bsv/sdk";
 import { Inscription as InscriptionTemplate } from "@bsv/templates";
 import { MapIndexer } from "./MapIndexer";
 import { parseAddress } from "./parseAddress";
-import { type IndexData, type IndexSummary, Indexer, type ParseContext } from "./types";
+import {
+  type IndexData,
+  type IndexSummary,
+  Indexer,
+  type ParseContext,
+} from "./types";
 
 export interface File {
   hash: string;
@@ -65,7 +70,10 @@ export class InscriptionIndexer extends Indexer {
     if (decoded.fields?.has("MAP")) {
       const mapData = decoded.fields.get("MAP");
       if (mapData) {
-        const map = MapIndexer.parseMap(Script.fromBinary(Array.from(mapData)), 0);
+        const map = MapIndexer.parseMap(
+          Script.fromBinary(Array.from(mapData)),
+          0,
+        );
         if (map) {
           txo.data.map = { data: map, tags: [] };
         }

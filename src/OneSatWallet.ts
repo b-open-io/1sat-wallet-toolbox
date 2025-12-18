@@ -18,23 +18,16 @@ import { OpNSIndexer } from "./indexers/OpNSIndexer";
 import { OrdLockIndexer } from "./indexers/OrdLockIndexer";
 import { OriginIndexer } from "./indexers/OriginIndexer";
 import { SigmaIndexer } from "./indexers/SigmaIndexer";
-import {
-  type ParseResult,
-  TransactionParser,
-} from "./indexers/TransactionParser";
-import type { Indexer } from "./indexers/types";
-import {
-  OneSatServices,
-  type ParsedOutputInfo,
-  type SyncOutput,
-} from "./services/OneSatServices";
+import { TransactionParser } from "./indexers/TransactionParser";
+import type { Indexer, ParseContext } from "./indexers/types";
+import { OneSatServices, type SyncOutput } from "./services/OneSatServices";
 import { ReadOnlySigner } from "./signers/ReadOnlySigner";
 
 /**
- * Result of ingestTransaction including parse details for debugging
+ * Result of ingestTransaction including parse context for debugging
  */
 export interface IngestResult extends InternalizeActionResult {
-  outputDetails: ParsedOutputInfo[];
+  parseContext: ParseContext;
   internalizedCount: number;
 }
 
@@ -160,12 +153,12 @@ export class OneSatWallet extends Wallet {
    *
    * @param txid - Transaction ID to fetch and parse
    * @param isBroadcasted - Whether this transaction has been broadcast
-   * @returns ParseResult with detailed output info
+   * @returns ParseContext with all indexer data
    */
   async parseTransaction(
     txid: string,
     isBroadcasted = true,
-  ): Promise<ParseResult> {
+  ): Promise<ParseContext> {
     // Try to get raw tx from storage first, fall back to network BEEF
     const rawTxResult = await this.services.getRawTx(txid);
     let tx: Transaction;
@@ -174,8 +167,8 @@ export class OneSatWallet extends Wallet {
       tx = Transaction.fromBinary(rawTxResult.rawTx);
     } else {
       // Fall back to fetching BEEF from network
-      const beef = await this.services.getBeefBytes(txid);
-      tx = Transaction.fromBEEF(beef);
+      const beef = await this.services.beef.getBeef(txid);
+      tx = Transaction.fromBEEF(Array.from(beef));
     }
 
     // Load source transactions for all inputs
@@ -186,9 +179,8 @@ export class OneSatWallet extends Wallet {
           input.sourceTransaction = Transaction.fromBinary(sourceResult.rawTx);
         } else {
           // Fall back to BEEF from network
-          input.sourceTransaction = Transaction.fromBEEF(
-            await this.services.getBeefBytes(input.sourceTXID!),
-          );
+          const beefBytes = await this.services.beef.getBeef(input.sourceTXID!);
+          input.sourceTransaction = Transaction.fromBEEF(Array.from(beefBytes));
         }
       }
     }
@@ -216,45 +208,79 @@ export class OneSatWallet extends Wallet {
     labels?: string[],
     isBroadcasted = true,
   ): Promise<IngestResult> {
-    // Convert to Transaction if needed
-
+    // Load source transactions for inputs that don't have them
     for (const input of tx.inputs) {
-      if (!input.sourceTransaction) {
-        input.sourceTransaction = Transaction.fromBEEF(
-          await this.services.getBeefBytes(input.sourceTXID!),
-        );
+      if (!input.sourceTransaction && input.sourceTXID) {
+        const beefBytes = await this.services.beef.getBeef(input.sourceTXID);
+        input.sourceTransaction = Transaction.fromBEEF(Array.from(beefBytes));
       }
     }
-    // Run through indexers
-    const parseResult = await this.parser.parse(tx, isBroadcasted);
 
-    // Build InternalizeOutput array from parsed results
-    // All synced outputs use basket insertion since we don't have derivation data
-    const outputs: InternalizeOutput[] = parseResult.outputs.map((parsed) => ({
-      outputIndex: parsed.vout,
-      protocol: "basket insertion" as const,
-      insertionRemittance: {
-        basket: parsed.basket || "default",
-        tags: parsed.tags,
-      },
-    }));
+    // Run through indexers
+    const ctx = await this.parser.parse(tx, isBroadcasted);
+
+    // Build InternalizeOutput array from owned txos
+    // Filter to only outputs owned by addresses in our set
+    const outputs: InternalizeOutput[] = [];
+    for (const txo of ctx.txos) {
+      if (txo.owner && this.owners.has(txo.owner)) {
+        // Collect tags from all indexer data
+        const tags: string[] = [];
+        for (const indexData of Object.values(txo.data)) {
+          if (indexData.tags) {
+            tags.push(...indexData.tags);
+          }
+        }
+        outputs.push({
+          outputIndex: txo.outpoint.vout,
+          protocol: "basket insertion" as const,
+          insertionRemittance: {
+            basket: txo.basket || "default",
+            tags,
+          },
+        });
+      }
+    }
 
     // Skip if no outputs to internalize
     if (outputs.length === 0) {
       return {
         accepted: true,
-        outputDetails: parseResult.outputDetails,
+        parseContext: ctx,
         internalizedCount: 0,
       };
     }
 
-    // Build BEEF for the transaction
-    // const beef = new Beef();
-    // beef.mergeTransaction(transaction);
+    // Debug: try to parse and verify the BEEF we're about to send
+    const beefBytes = tx.toAtomicBEEF(false);
+    try {
+      const testTx = Transaction.fromAtomicBEEF(beefBytes);
+      console.log("BEEF validation passed, txid:", testTx.id("hex"));
+
+      // Test verify with our chain tracker
+      const ab = Beef.fromBinary(beefBytes);
+      console.log("atomicTxid:", ab.atomicTxid);
+      const chainTracker = await this.services.getChainTracker();
+      const txValid = await ab.verify(chainTracker, false);
+      console.log("verify result:", txValid);
+      if (!txValid) {
+        console.log("BEEF log:", ab.toLogString());
+      }
+    } catch (e) {
+      console.error("BEEF validation failed:", e);
+      console.log("Transaction inputs:", tx.inputs.length);
+      for (let i = 0; i < tx.inputs.length; i++) {
+        const input = tx.inputs[i];
+        console.log(
+          `  Input ${i}: sourceTXID=${input.sourceTXID}, hasSourceTx=${!!input.sourceTransaction}, hasMerklePath=${!!input.sourceTransaction?.merklePath}`,
+        );
+      }
+      throw e;
+    }
 
     // Call parent's internalizeAction
     const result = await this.internalizeAction({
-      tx: tx.toAtomicBEEF(false),
+      tx: beefBytes,
       outputs,
       description,
       labels,
@@ -262,7 +288,7 @@ export class OneSatWallet extends Wallet {
 
     return {
       ...result,
-      outputDetails: parseResult.outputDetails,
+      parseContext: ctx,
       internalizedCount: outputs.length,
     };
   }
@@ -326,10 +352,12 @@ export class OneSatWallet extends Wallet {
         }
 
         const vout = Number.parseInt(output.outpoint.substring(65), 10);
-        const hasOutput = await this.storage.runAsStorageProvider(async (sp) => {
-          const outputs = await sp.findOutputs({ partial: { txid, vout } });
-          return outputs.length > 0;
-        });
+        const hasOutput = await this.storage.runAsStorageProvider(
+          async (sp) => {
+            const outputs = await sp.findOutputs({ partial: { txid, vout } });
+            return outputs.length > 0;
+          },
+        );
 
         if (!hasOutput) {
           if (output.spendTxid) {
@@ -343,15 +371,15 @@ export class OneSatWallet extends Wallet {
             return;
           }
           // Unspent - fetch and ingest
-          const beef = await this.services.getBeefBytes(txid);
-          const tx = Transaction.fromBEEF(beef);
+          const beef = await this.services.beef.getBeef(txid);
+          const tx = Transaction.fromBEEF(Array.from(beef));
           if (tx) {
             const result = await this.ingestTransaction(tx, "1sat-sync");
             seenTxids.add(txid);
             this.services.emit("sync:parsed", {
               address: addr,
               txid,
-              outputs: result.outputDetails,
+              parseContext: result.parseContext,
               internalizedCount: result.internalizedCount,
             });
           }
@@ -391,15 +419,15 @@ export class OneSatWallet extends Wallet {
     });
 
     if (!hasSpend) {
-      const beef = await this.services.getBeefBytes(output.spendTxid);
-      const tx = Transaction.fromBEEF(beef);
+      const beef = await this.services.beef.getBeef(output.spendTxid);
+      const tx = Transaction.fromBEEF(Array.from(beef));
       if (tx) {
         const result = await this.ingestTransaction(tx, "1sat-sync");
         seenTxids.add(output.spendTxid);
         this.services.emit("sync:parsed", {
           address: addr,
           txid: output.spendTxid,
-          outputs: result.outputDetails,
+          parseContext: result.parseContext,
           internalizedCount: result.internalizedCount,
         });
       }

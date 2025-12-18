@@ -128,7 +128,7 @@ export class Bsv21Indexer extends Indexer {
 
       // Validate this specific input against the overlay
       try {
-        const overlayData = await this.services.getBsv21TokenByTxid(
+        const overlayData = await this.services.bsv21.getTokenByTxid(
           tokenData.id,
           spend.outpoint.txid,
         );

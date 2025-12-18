@@ -7,15 +7,23 @@ import { PrivateKey } from "@bsv/sdk";
 import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
 
 // DOM Elements
-const indexerUrlInput = document.getElementById("indexer-url") as HTMLInputElement;
+const indexerUrlInput = document.getElementById(
+  "indexer-url",
+) as HTMLInputElement;
 const chainSelect = document.getElementById("chain") as HTMLSelectElement;
 const addressInput = document.getElementById("address") as HTMLInputElement;
 const syncBtn = document.getElementById("sync-btn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stop-btn") as HTMLButtonElement;
 const resyncBtn = document.getElementById("resync-btn") as HTMLButtonElement;
-const resetProgressBtn = document.getElementById("reset-progress-btn") as HTMLButtonElement;
-const clearStorageBtn = document.getElementById("clear-storage-btn") as HTMLButtonElement;
-const syncProgressInfo = document.getElementById("sync-progress-info") as HTMLDivElement;
+const resetProgressBtn = document.getElementById(
+  "reset-progress-btn",
+) as HTMLButtonElement;
+const clearStorageBtn = document.getElementById(
+  "clear-storage-btn",
+) as HTMLButtonElement;
+const syncProgressInfo = document.getElementById(
+  "sync-progress-info",
+) as HTMLDivElement;
 const txidInput = document.getElementById("txid") as HTMLInputElement;
 const parseTxBtn = document.getElementById("parse-tx-btn") as HTMLButtonElement;
 const statusBox = document.getElementById("status") as HTMLDivElement;
@@ -23,9 +31,15 @@ const progressBar = document.getElementById("progress-bar") as HTMLDivElement;
 const progressText = document.getElementById("progress-text") as HTMLDivElement;
 const logsBox = document.getElementById("logs") as HTMLDivElement;
 const dataDisplay = document.getElementById("data-display") as HTMLDivElement;
-const listOutputsBtn = document.getElementById("list-outputs-btn") as HTMLButtonElement;
-const listActionsBtn = document.getElementById("list-actions-btn") as HTMLButtonElement;
-const showBasketsBtn = document.getElementById("show-baskets-btn") as HTMLButtonElement;
+const listOutputsBtn = document.getElementById(
+  "list-outputs-btn",
+) as HTMLButtonElement;
+const listActionsBtn = document.getElementById(
+  "list-actions-btn",
+) as HTMLButtonElement;
+const showBasketsBtn = document.getElementById(
+  "show-baskets-btn",
+) as HTMLButtonElement;
 
 // State
 let wallet: OneSatWallet | null = null;
@@ -60,7 +74,10 @@ function flushLogs() {
   logFlushScheduled = false;
 }
 
-function log(message: string, type: "info" | "success" | "error" | "tx" = "info") {
+function log(
+  message: string,
+  type: "info" | "success" | "error" | "tx" = "info",
+) {
   const time = new Date().toLocaleTimeString();
   logBuffer.push({ message, type, time });
 
@@ -76,7 +93,10 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-function setStatus(message: string, type: "syncing" | "success" | "error" | "" = "") {
+function setStatus(
+  message: string,
+  type: "syncing" | "success" | "error" | "" = "",
+) {
   statusBox.textContent = message;
   statusBox.className = `status-box ${type}`;
 }
@@ -172,7 +192,10 @@ async function initWallet(address: string): Promise<OneSatWallet> {
   let outputCount = 0;
 
   walletInstance.services.on("sync:start", (event) => {
-    log(`Sync started for ${event.address} from score ${event.fromScore}`, "info");
+    log(
+      `Sync started for ${event.address} from score ${event.fromScore}`,
+      "info",
+    );
     setStatus("Syncing...", "syncing");
     setProgress(0, "Starting sync...");
     outputCount = 0;
@@ -184,7 +207,10 @@ async function initWallet(address: string): Promise<OneSatWallet> {
     const outpoint = event.output.outpoint;
     const spent = event.output.spendTxid ? " (spent)" : "";
     log(`Output ${outputCount}: ${outpoint}${spent}`, "tx");
-    setProgress(0, `Processing output ${outputCount} (score: ${event.output.score.toFixed(0)})`);
+    setProgress(
+      0,
+      `Processing output ${outputCount} (score: ${event.output.score.toFixed(0)})`,
+    );
   });
 
   walletInstance.services.on("sync:error", (event) => {
@@ -196,7 +222,10 @@ async function initWallet(address: string): Promise<OneSatWallet> {
   });
 
   walletInstance.services.on("sync:complete", (event) => {
-    log(`Sync complete for ${event.address}. Processed ${outputCount} outputs.`, "success");
+    log(
+      `Sync complete for ${event.address}. Processed ${outputCount} outputs.`,
+      "success",
+    );
     setStatus(`Sync complete! Processed ${outputCount} outputs.`, "success");
     setProgress(100, "Complete!");
     isSyncing = false;
@@ -209,18 +238,20 @@ async function initWallet(address: string): Promise<OneSatWallet> {
   });
 
   walletInstance.services.on("sync:parsed", (event) => {
-    const included = event.outputs.filter(o => o.included);
+    const ctx = event.parseContext;
 
-    if (included.length > 0) {
-      for (const out of included) {
-        const indexers = Object.keys(out.indexerData).join(", ") || "none";
-        log(`PARSED ${event.txid}_${out.vout} -> basket="${out.basket}" owner=${out.owner} indexers=[${indexers}]`, "success");
-      }
-    } else {
-      log(`EXCLUDED ${event.txid} - no outputs included`, "error");
+    for (const txo of ctx.txos) {
+      const indexers = Object.keys(txo.data).join(", ") || "none";
+      log(
+        `PARSED ${txo.outpoint.toString()} -> basket="${txo.basket || ""}" owner=${txo.owner || "none"} indexers=[${indexers}]`,
+        txo.owner ? "success" : "info",
+      );
     }
 
-    log(`TX ${event.txid}: ${event.internalizedCount}/${event.outputs.length} outputs internalized`, "info");
+    log(
+      `TX ${event.txid}: ${event.internalizedCount}/${ctx.txos.length} outputs internalized`,
+      "info",
+    );
   });
 
   return walletInstance;
@@ -274,7 +305,7 @@ async function clearStorage() {
         keysToRemove.push(key);
       }
     }
-    keysToRemove.forEach(key => localStorage.removeItem(key));
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
 
     // Delete IndexedDB
     await new Promise<void>((resolve, reject) => {
@@ -288,7 +319,8 @@ async function clearStorage() {
     log(`Cleared storage for ${chain}`, "success");
     setStatus("Storage cleared", "success");
     setProgress(0, "");
-    dataDisplay.innerHTML = '<p class="placeholder">Storage cleared - sync again to see data</p>';
+    dataDisplay.innerHTML =
+      '<p class="placeholder">Storage cleared - sync again to see data</p>';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`Failed to clear storage: ${message}`, "error");
@@ -298,7 +330,8 @@ async function clearStorage() {
 // List outputs
 async function listOutputs() {
   if (!wallet) {
-    dataDisplay.innerHTML = '<p class="placeholder">No wallet initialized. Click Sync first.</p>';
+    dataDisplay.innerHTML =
+      '<p class="placeholder">No wallet initialized. Click Sync first.</p>';
     return;
   }
 
@@ -311,7 +344,7 @@ async function listOutputs() {
 
     if (result.outputs.length === 0) {
       // Try with specific baskets
-      const baskets = ["1sat", "bsv21", "lock"];
+      const baskets = ["1sat", "bsv21", "lock", "fund"];
       let allOutputs: typeof result.outputs = [];
 
       for (const basket of baskets) {
@@ -328,7 +361,8 @@ async function listOutputs() {
       }
 
       if (allOutputs.length === 0) {
-        dataDisplay.innerHTML = '<p class="placeholder">No outputs found in wallet</p>';
+        dataDisplay.innerHTML =
+          '<p class="placeholder">No outputs found in wallet</p>';
         return;
       }
 
@@ -350,7 +384,7 @@ async function listOutputs() {
           </div>
           <div><span class="label">Satoshis:</span><span class="value">${output.satoshis}</span></div>
           <div><span class="label">Spendable:</span><span class="value">${output.spendable}</span></div>
-          ${output.tags?.length ? `<div><span class="label">Tags:</span>${output.tags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+          ${output.tags?.length ? `<div><span class="label">Tags:</span>${output.tags.map((t) => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
         </div>
       `;
     }
@@ -369,7 +403,8 @@ async function listOutputs() {
 // List actions
 async function listActions() {
   if (!wallet) {
-    dataDisplay.innerHTML = '<p class="placeholder">No wallet initialized. Click Sync first.</p>';
+    dataDisplay.innerHTML =
+      '<p class="placeholder">No wallet initialized. Click Sync first.</p>';
     return;
   }
 
@@ -383,7 +418,8 @@ async function listActions() {
     });
 
     if (result.actions.length === 0) {
-      dataDisplay.innerHTML = '<p class="placeholder">No actions found in wallet</p>';
+      dataDisplay.innerHTML =
+        '<p class="placeholder">No actions found in wallet</p>';
       return;
     }
 
@@ -402,7 +438,7 @@ async function listActions() {
           <div><span class="label">Description:</span><span class="value">${escapeHtml(action.description)}</span></div>
           <div><span class="label">Status:</span><span class="value">${action.status}</span></div>
           <div><span class="label">Satoshis:</span><span class="value">${action.satoshis}</span></div>
-          ${action.labels?.length ? `<div><span class="label">Labels:</span>${action.labels.map(l => `<span class="basket-badge">${escapeHtml(l)}</span>`).join("")}</div>` : ""}
+          ${action.labels?.length ? `<div><span class="label">Labels:</span>${action.labels.map((l) => `<span class="basket-badge">${escapeHtml(l)}</span>`).join("")}</div>` : ""}
           <div><span class="label">Inputs:</span><span class="value">${action.inputs?.length || 0}</span></div>
           <div><span class="label">Outputs:</span><span class="value">${action.outputs?.length || 0}</span></div>
         </div>
@@ -423,7 +459,8 @@ async function listActions() {
 // Show baskets summary
 async function showBaskets() {
   if (!storage) {
-    dataDisplay.innerHTML = '<p class="placeholder">No storage initialized. Sync an address first.</p>';
+    dataDisplay.innerHTML =
+      '<p class="placeholder">No storage initialized. Sync an address first.</p>';
     return;
   }
 
@@ -444,7 +481,10 @@ async function showBaskets() {
     for (const output of outputs) {
       const basket = output.basketId?.toString() || "unknown";
       basketCounts.set(basket, (basketCounts.get(basket) || 0) + 1);
-      basketSatoshis.set(basket, (basketSatoshis.get(basket) || 0) + (output.satoshis || 0));
+      basketSatoshis.set(
+        basket,
+        (basketSatoshis.get(basket) || 0) + (output.satoshis || 0),
+      );
     }
 
     let html = `<h3>Storage Summary</h3>`;
@@ -489,7 +529,10 @@ async function showBaskets() {
     html += "</div>";
 
     dataDisplay.innerHTML = html;
-    log(`Found ${outputs.length} outputs in ${basketCounts.size} baskets`, "info");
+    log(
+      `Found ${outputs.length} outputs in ${basketCounts.size} baskets`,
+      "info",
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     dataDisplay.innerHTML = `<p class="placeholder">Error querying storage: ${escapeHtml(message)}</p>`;
@@ -518,58 +561,93 @@ async function parseTx() {
   try {
     // Initialize wallet if needed (with empty owner set for parsing)
     if (!wallet) {
-      const address = addressInput.value.trim() || "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"; // dummy address
+      const address =
+        addressInput.value.trim() || "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"; // dummy address
       wallet = await initWallet(address);
     }
 
-    const result = await wallet.parseTransaction(txid);
+    const ctx = await wallet.parseTransaction(txid);
 
-    log(`Parse complete - ${result.outputs.length} owned outputs, ${result.outputDetails.length} total outputs`, "success");
+    log(
+      `Parse complete - ${ctx.txos.length} outputs, ${ctx.spends.length} spends`,
+      "success",
+    );
 
-    // Log each output detail
-    for (const out of result.outputDetails) {
-      const indexers = Object.keys(out.indexerData).join(", ") || "none";
-      if (out.included) {
-        log(`OUTPUT ${txid}_${out.vout} -> INCLUDED basket="${out.basket}" owner=${out.owner} indexers=[${indexers}]`, "success");
-      } else {
-        log(`OUTPUT ${txid}_${out.vout} -> EXCLUDED: ${out.excludeReason} indexers=[${indexers}]`, "error");
-      }
+    // Log each txo
+    for (const txo of ctx.txos) {
+      const indexers = Object.keys(txo.data).join(", ") || "none";
+      const isOwned = txo.owner && wallet.services ? true : false;
+      log(
+        `OUTPUT ${txo.outpoint.toString()} -> owner=${txo.owner || "none"} basket="${txo.basket || ""}" indexers=[${indexers}]`,
+        isOwned ? "success" : "info",
+      );
 
       // Log detailed indexer data
-      for (const [tag, data] of Object.entries(out.indexerData)) {
+      for (const [tag, data] of Object.entries(txo.data)) {
         log(`  [${tag}]: ${JSON.stringify(data)}`, "info");
       }
     }
 
-    // Show summary if present
-    if (result.summary) {
-      log(`SUMMARY: ${JSON.stringify(result.summary, null, 2)}`, "info");
+    // Log spends
+    if (ctx.spends.length > 0) {
+      log(`SPENDS (${ctx.spends.length}):`, "info");
+      for (const spend of ctx.spends) {
+        const indexers = Object.keys(spend.data).join(", ") || "none";
+        log(`  ${spend.outpoint.toString()} -> indexers=[${indexers}]`, "info");
+      }
     }
 
-    // Display in data section
-    let html = `<h3>Parse Result for ${txid.slice(0, 8)}...${txid.slice(-8)}</h3>`;
-    html += `<p><strong>Owned Outputs:</strong> ${result.outputs.length} / ${result.outputDetails.length}</p>`;
+    // Show summary if present
+    if (Object.keys(ctx.summary).length > 0) {
+      log(`SUMMARY: ${JSON.stringify(ctx.summary, null, 2)}`, "info");
+    }
 
+    // Display in data section - show full ParseContext
+    let html = `<h3>ParseContext for ${txid.slice(0, 8)}...${txid.slice(-8)}</h3>`;
+    html += `<p><strong>Outputs:</strong> ${ctx.txos.length} | <strong>Spends:</strong> ${ctx.spends.length}</p>`;
+
+    html += "<h4>Outputs (txos)</h4>";
     html += '<div class="outputs-list">';
-    for (const out of result.outputDetails) {
-      const statusClass = out.included ? "included" : "excluded";
+    for (const txo of ctx.txos) {
+      const tags: string[] = [];
+      for (const indexData of Object.values(txo.data)) {
+        if (indexData.tags) {
+          tags.push(...indexData.tags);
+        }
+      }
       html += `
-        <div class="data-item ${statusClass}">
-          <div><span class="label">Output:</span><span class="value">${txid}_${out.vout}</span></div>
-          <div><span class="label">Status:</span><span class="value">${out.included ? "INCLUDED" : "EXCLUDED"}</span></div>
-          ${out.owner ? `<div><span class="label">Owner:</span><span class="value">${out.owner}</span></div>` : ""}
-          ${out.basket ? `<div><span class="label">Basket:</span><span class="basket-badge">${escapeHtml(out.basket)}</span></div>` : ""}
-          ${out.excludeReason ? `<div><span class="label">Reason:</span><span class="value">${escapeHtml(out.excludeReason)}</span></div>` : ""}
-          ${out.tags.length > 0 ? `<div><span class="label">Tags:</span>${out.tags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
-          <div><span class="label">Indexers:</span><span class="value">${Object.keys(out.indexerData).join(", ") || "none"}</span></div>
-          <div class="json-viewer"><pre>${escapeHtml(JSON.stringify(out.indexerData, null, 2))}</pre></div>
+        <div class="data-item">
+          <div><span class="label">Outpoint:</span><span class="value">${txo.outpoint.toString()}</span></div>
+          <div><span class="label">Satoshis:</span><span class="value">${txo.satoshis.toString()}</span></div>
+          ${txo.owner ? `<div><span class="label">Owner:</span><span class="value">${txo.owner}</span></div>` : ""}
+          ${txo.basket ? `<div><span class="label">Basket:</span><span class="basket-badge">${escapeHtml(txo.basket)}</span></div>` : ""}
+          ${tags.length > 0 ? `<div><span class="label">Tags:</span>${tags.map((t) => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+          <div><span class="label">Indexers:</span><span class="value">${Object.keys(txo.data).join(", ") || "none"}</span></div>
+          <div class="json-viewer"><pre>${escapeHtml(JSON.stringify(txo.data, null, 2))}</pre></div>
         </div>
       `;
     }
     html += "</div>";
 
-    if (result.summary) {
-      html += `<h3>Summary</h3><div class="json-viewer"><pre>${escapeHtml(JSON.stringify(result.summary, null, 2))}</pre></div>`;
+    if (ctx.spends.length > 0) {
+      html += "<h4>Spends</h4>";
+      html += '<div class="outputs-list">';
+      for (const spend of ctx.spends) {
+        html += `
+          <div class="data-item">
+            <div><span class="label">Outpoint:</span><span class="value">${spend.outpoint.toString()}</span></div>
+            <div><span class="label">Satoshis:</span><span class="value">${spend.satoshis.toString()}</span></div>
+            ${spend.owner ? `<div><span class="label">Owner:</span><span class="value">${spend.owner}</span></div>` : ""}
+            <div><span class="label">Indexers:</span><span class="value">${Object.keys(spend.data).join(", ") || "none"}</span></div>
+            <div class="json-viewer"><pre>${escapeHtml(JSON.stringify(spend.data, null, 2))}</pre></div>
+          </div>
+        `;
+      }
+      html += "</div>";
+    }
+
+    if (Object.keys(ctx.summary).length > 0) {
+      html += `<h4>Summary</h4><div class="json-viewer"><pre>${escapeHtml(JSON.stringify(ctx.summary, null, 2))}</pre></div>`;
     }
 
     dataDisplay.innerHTML = html;
@@ -677,9 +755,19 @@ async function parseAndShowModal(txid: string) {
 
   try {
     log(`Parsing transaction ${txid}...`, "info");
-    const result = await wallet.parseTransaction(txid);
-    const jsonStr = JSON.stringify(result, null, 2);
-    showModal(`Parse Result: ${txid}`, jsonStr);
+    const ctx = await wallet.parseTransaction(txid);
+    // Custom replacer to handle BigInt and exclude tx/indexers
+    const jsonStr = JSON.stringify(
+      ctx,
+      (key, value) => {
+        if (key === "tx" || key === "indexers" || key === "script")
+          return undefined;
+        if (typeof value === "bigint") return value.toString();
+        return value;
+      },
+      2,
+    );
+    showModal(`ParseContext: ${txid}`, jsonStr);
     log(`Parse complete for ${txid}`, "success");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -689,7 +777,9 @@ async function parseAndShowModal(txid: string) {
 }
 
 // Make parseAndShowModal available globally for onclick handlers
-(window as unknown as { parseAndShowModal: typeof parseAndShowModal }).parseAndShowModal = parseAndShowModal;
+(
+  window as unknown as { parseAndShowModal: typeof parseAndShowModal }
+).parseAndShowModal = parseAndShowModal;
 
 // Initial log
 log("1Sat Wallet Sync Tester initialized", "info");

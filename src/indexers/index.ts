@@ -28,8 +28,4 @@ export { OrdLockIndexer, Listing } from "./OrdLockIndexer";
 export { OpNSIndexer } from "./OpNSIndexer";
 export { CosignIndexer, type CosignData } from "./CosignIndexer";
 
-export {
-  TransactionParser,
-  type ParsedOutput,
-  type ParseResult,
-} from "./TransactionParser";
+export { TransactionParser } from "./TransactionParser";

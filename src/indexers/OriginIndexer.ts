@@ -80,7 +80,7 @@ export class OriginIndexer extends Indexer {
     if (sourceOutpoint) {
       // Transfer - fetch metadata from OrdFS
       try {
-        const metadata = await this.services.getOrdfsMetadata(sourceOutpoint);
+        const metadata = await this.services.ordfs.getMetadata(sourceOutpoint);
         origin.outpoint = metadata.origin || sourceOutpoint;
         origin.nonce = metadata.sequence + 1;
         origin.map = metadata.map;
@@ -119,7 +119,7 @@ export class OriginIndexer extends Indexer {
       // Validate parent if inscription claims one
       if (insc.parent) {
         try {
-          const metadata = await this.services.getOrdfsMetadata(
+          const metadata = await this.services.ordfs.getMetadata(
             txo.outpoint.toString(),
           );
           if (metadata.parent !== insc.parent) {

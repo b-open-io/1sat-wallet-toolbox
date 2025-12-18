@@ -9,13 +9,14 @@ export {
   type OneSatWalletArgs,
   type IngestResult,
 } from "./OneSatWallet";
-export type { ParseResult, ParsedOutput } from "./indexers/TransactionParser";
+export { TransactionParser } from "./indexers/TransactionParser";
 export {
   OneSatServices,
-  type OrdfsMetadata,
   type SyncOutput,
   type OneSatServicesEvents,
 } from "./services/OneSatServices";
+export type { OrdfsMetadata, Capability } from "./services/types";
+export * from "./services/client";
 export { ReadOnlySigner } from "./signers/ReadOnlySigner";
 
 // Indexers
