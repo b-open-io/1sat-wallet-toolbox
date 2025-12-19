@@ -22,7 +22,7 @@ export class Bsv21Client extends BaseClient {
   private cache = new Map<string, Bsv21TokenDetails>();
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(baseUrl, options);
+    super(`${baseUrl}/api/bsv21`, options);
   }
 
   /**

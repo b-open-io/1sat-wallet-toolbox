@@ -12,7 +12,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class BeefClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(baseUrl, options);
+    super(`${baseUrl}/api/beef`, options);
   }
 
   /**
@@ -25,8 +25,8 @@ export class BeefClient extends BaseClient {
   /**
    * Get raw transaction bytes
    */
-  async getRaw(txid: string): Promise<Uint8Array> {
-    return this.requestBinary(`/${txid}/raw`);
+  async getRawTx(txid: string): Promise<Uint8Array> {
+    return this.requestBinary(`/${txid}/tx`);
   }
 
   /**

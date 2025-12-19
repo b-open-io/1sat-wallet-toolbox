@@ -20,7 +20,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class ArcadeClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(baseUrl, options);
+    super(`${baseUrl}/api/arcade`, options);
   }
 
   /**

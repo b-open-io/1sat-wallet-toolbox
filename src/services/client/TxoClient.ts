@@ -22,7 +22,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class TxoClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(baseUrl, options);
+    super(`${baseUrl}/api/txo`, options);
   }
 
   /**

@@ -1,4 +1,4 @@
-import type { Transaction } from "@bsv/sdk";
+import type { Transaction, TransactionOutput } from "@bsv/sdk";
 import type { Outpoint } from "./Outpoint";
 
 /**
@@ -59,15 +59,24 @@ export interface IndexSummary {
 }
 
 /**
- * Minimal transaction output structure used during parsing
+ * Result from Indexer.parse() method
+ */
+export interface ParseResult {
+  data: unknown;
+  tags: string[];
+  owner?: string;
+  basket?: string;
+}
+
+/**
+ * Transaction output structure used during parsing
  */
 export interface Txo {
-  satoshis: bigint;
-  script: number[];
+  output: TransactionOutput;
+  outpoint: Outpoint;
   owner?: string;
   basket?: string;
   data: { [tag: string]: IndexData };
-  outpoint: Outpoint;
 }
 
 /**
@@ -95,19 +104,17 @@ export abstract class Indexer {
   ) {}
 
   /**
-   * Parses an output and returns the index data if it is relevant to this indexer.
-   * If the output is not relevant, it returns undefined.
+   * Parses a single output in isolation and returns the parse result if relevant.
+   * Cannot access other outputs or inputs - only the single Txo.
+   * Cross-output/cross-input logic belongs in summarize().
    */
-  abstract parse(
-    ctx: ParseContext,
-    vout: number,
-    isBroadcasted: boolean,
-  ): Promise<IndexData | undefined>;
+  abstract parse(txo: Txo): Promise<ParseResult | undefined>;
 
   /**
-   * Evaluates the index data for the entire transaction and returns a summary.
+   * Post-parse phase with full transaction context.
+   * Used for cross-output/cross-input validation and transaction-level summarization.
    */
-  async summerize(
+  async summarize(
     _ctx: ParseContext,
     _isBroadcasted: boolean,
   ): Promise<IndexSummary | undefined> {

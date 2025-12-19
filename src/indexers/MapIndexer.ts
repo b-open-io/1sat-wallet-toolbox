@@ -1,6 +1,6 @@
 import { OP, Script, Utils } from "@bsv/sdk";
 import { MAP_PREFIX } from "@bsv/templates";
-import { type IndexData, Indexer, type ParseContext } from "./types";
+import { Indexer, type ParseResult, type Txo } from "./types";
 
 export class MapIndexer extends Indexer {
   tag = "map";
@@ -13,8 +13,8 @@ export class MapIndexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
-    const script = ctx.tx.outputs[vout].lockingScript;
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
+    const script = txo.output.lockingScript;
 
     const retPos = script.chunks.findIndex(
       (chunk) => chunk.op === OP.OP_RETURN,

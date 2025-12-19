@@ -3,10 +3,11 @@ import { Inscription as InscriptionTemplate } from "@bsv/templates";
 import { MapIndexer } from "./MapIndexer";
 import { parseAddress } from "./parseAddress";
 import {
-  type IndexData,
   type IndexSummary,
   Indexer,
   type ParseContext,
+  type ParseResult,
+  type Txo,
 } from "./types";
 
 export interface File {
@@ -42,31 +43,30 @@ export class InscriptionIndexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
-    const txo = ctx.txos[vout];
-    if (txo.satoshis !== 1n) return;
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
+    const satoshis = BigInt(txo.output.satoshis || 0);
+    if (satoshis !== 1n) return;
 
-    const script = ctx.tx.outputs[vout].lockingScript;
+    const script = txo.output.lockingScript;
 
     // Use template decode
     const decoded = InscriptionTemplate.decode(script);
     if (!decoded) return;
 
     // Extract owner from script prefix or suffix
-    if (!txo.owner) {
-      txo.owner = parseAddress(script, 0, this.network);
-    }
-    if (!txo.owner && decoded.scriptSuffix) {
+    let owner = parseAddress(script, 0, this.network);
+    if (!owner && decoded.scriptSuffix) {
       // Try to find owner in suffix (after OP_ENDIF)
       const suffixScript = Script.fromBinary(Array.from(decoded.scriptSuffix));
-      txo.owner = parseAddress(suffixScript, 0, this.network);
+      owner = parseAddress(suffixScript, 0, this.network);
       // Also check for OP_CODESEPARATOR pattern
-      if (!txo.owner && suffixScript.chunks[0]?.op === OP.OP_CODESEPARATOR) {
-        txo.owner = parseAddress(suffixScript, 1, this.network);
+      if (!owner && suffixScript.chunks[0]?.op === OP.OP_CODESEPARATOR) {
+        owner = parseAddress(suffixScript, 1, this.network);
       }
     }
 
     // Handle MAP field if present (special case)
+    // Note: This writes to txo.data.map directly as a side effect
     if (decoded.fields?.has("MAP")) {
       const mapData = decoded.fields.get("MAP");
       if (mapData) {
@@ -104,10 +104,10 @@ export class InscriptionIndexer extends Indexer {
     }
 
     // Convert fields to base64 strings
-    if (decoded.fields) {
+    if (decoded.fields && insc.fields) {
       for (const [key, value] of decoded.fields) {
         if (key !== "MAP") {
-          insc.fields![key] = Buffer.from(value).toString("base64");
+          insc.fields[key] = Buffer.from(value).toString("base64");
         }
       }
     }
@@ -115,10 +115,11 @@ export class InscriptionIndexer extends Indexer {
     return {
       data: insc,
       tags: [],
+      owner,
     };
   }
 
-  async summerize(ctx: ParseContext): Promise<IndexSummary | undefined> {
+  async summarize(ctx: ParseContext): Promise<IndexSummary | undefined> {
     // Clear file content before saving - content is loaded locally but shouldn't be persisted
     for (const txo of ctx.txos) {
       const insc = txo.data[this.tag]?.data as Inscription | undefined;

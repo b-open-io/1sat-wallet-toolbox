@@ -2,12 +2,12 @@ import { HD, Hash, Utils } from "@bsv/sdk";
 import { BSV21 } from "@bsv/templates";
 import { HttpError } from "../errors";
 import type { OneSatServices } from "../services/OneSatServices";
-import { Outpoint } from "./Outpoint";
 import {
-  type IndexData,
   type IndexSummary,
   Indexer,
   type ParseContext,
+  type ParseResult,
+  type Txo,
 } from "./types";
 
 const FEE_XPUB =
@@ -33,7 +33,7 @@ export interface Bsv21 {
  * Data structure: Bsv21 with id, op, amt, dec, status, etc.
  *
  * Basket: 'bsv21'
- * Events: address, id, status
+ * Events: id, id:status, bsv21:amt
  */
 export class Bsv21Indexer extends Indexer {
   tag = "bsv21";
@@ -47,19 +47,14 @@ export class Bsv21Indexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(
-    ctx: ParseContext,
-    vout: number,
-    _isBroadcasted: boolean,
-  ): Promise<IndexData | undefined> {
-    const txo = ctx.txos[vout];
-    const lockingScript = ctx.tx.outputs[vout].lockingScript;
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
+    const lockingScript = txo.output.lockingScript;
 
     // Use template decode
     const decoded = BSV21.decode(lockingScript);
     if (!decoded) return;
 
-    const outpoint = new Outpoint(ctx.txid, vout);
+    const outpoint = txo.outpoint;
     const tokenData = decoded.tokenData;
 
     // Create indexer data structure
@@ -81,17 +76,17 @@ export class Bsv21Indexer extends Indexer {
     if (txo.owner && this.owners.has(txo.owner)) {
       tags.push(`id:${bsv21.id}`);
       tags.push(`id:${bsv21.id}:${bsv21.status}`);
+      tags.push(`amt:${bsv21.amt.toString()}`);
     }
-
-    txo.basket = "bsv21";
 
     return {
       data: bsv21,
       tags,
+      basket: "bsv21",
     };
   }
 
-  async summerize(ctx: ParseContext): Promise<IndexSummary | undefined> {
+  async summarize(ctx: ParseContext): Promise<IndexSummary | undefined> {
     const tokens: {
       [id: string]: {
         sym?: string;

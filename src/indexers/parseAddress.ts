@@ -17,8 +17,7 @@ export function parseAddress(
   if (script.chunks[2 + offset]?.data?.length !== 20) return "";
   if (script.chunks[3 + offset]?.op !== OP.OP_EQUALVERIFY) return "";
   if (script.chunks[4 + offset]?.op !== OP.OP_CHECKSIG) return "";
-  return Utils.toBase58Check(
-    script.chunks[2 + offset].data!,
-    network === "mainnet" ? [0] : [111],
-  );
+  const data = script.chunks[2 + offset].data;
+  if (!data) return "";
+  return Utils.toBase58Check(data, network === "mainnet" ? [0] : [111]);
 }

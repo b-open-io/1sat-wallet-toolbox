@@ -1,9 +1,10 @@
 import { OrdLock } from "@bsv/templates";
 import {
-  type IndexData,
   type IndexSummary,
   Indexer,
   type ParseContext,
+  type ParseResult,
+  type Txo,
 } from "./types";
 
 export class Listing {
@@ -24,23 +25,22 @@ export class OrdLockIndexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
-    const txo = ctx.txos[vout];
-    const lockingScript = ctx.tx.outputs[vout].lockingScript;
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
+    const lockingScript = txo.output.lockingScript;
 
     const decoded = OrdLock.decode(lockingScript, this.network === "mainnet");
     if (!decoded) return;
 
     const listing = new Listing(decoded.payout, decoded.price);
-    txo.owner = decoded.seller;
 
     return {
       data: listing,
       tags: ["ordlock"],
+      owner: decoded.seller,
     };
   }
 
-  async summerize(ctx: ParseContext): Promise<IndexSummary | undefined> {
+  async summarize(ctx: ParseContext): Promise<IndexSummary | undefined> {
     // Check if any input was spending a listing
     for (const [vin, spend] of ctx.spends.entries()) {
       if (spend.data[this.tag]) {

@@ -1,11 +1,4 @@
-import {
-  Beef,
-  type ChainTracker,
-  Hash,
-  MerklePath,
-  type Transaction,
-  Utils,
-} from "@bsv/sdk";
+import { Beef, Hash, MerklePath, Transaction, Utils } from "@bsv/sdk";
 import type { WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
 import { WalletError } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletError";
 import type {
@@ -34,44 +27,30 @@ import {
   TxoClient,
 } from "./client";
 import type { Capability, ClientOptions, SyncOutput } from "./types";
-import type { ParseContext } from "../indexers/types";
 
 export type { SyncOutput };
-
-export interface OneSatServicesEvents {
-  "sync:start": { address: string; fromScore: number };
-  "sync:output": { address: string; output: SyncOutput };
-  "sync:skipped": { address: string; outpoint: string; reason: string };
-  "sync:parsed": {
-    address: string;
-    txid: string;
-    parseContext: ParseContext;
-    internalizedCount: number;
-  };
-  "sync:error": { address: string; error: Error };
-  "sync:complete": { address: string };
-}
-
-type SyncOutputHandler = (address: string, output: SyncOutput) => Promise<void>;
-type EventCallback<T> = (event: T) => void;
 
 /**
  * WalletServices implementation for 1Sat ecosystem.
  *
- * Uses the unified 1Sat API at api.1sat.app for:
- * - Block headers and chain tracking (/api/chaintracks/*)
- * - Raw transactions and proofs (/api/beef/*)
- * - Transaction broadcasting (/api/arcade/*)
- * - BSV21 token data (/api/bsv21/*)
- * - Transaction outputs (/api/txo/*)
- * - Owner queries and sync (/api/owner/*)
- * - Content serving (/api/ordfs/*, /content/*)
+ * Provides access to 1Sat API clients and implements the WalletServices
+ * interface required by wallet-toolbox.
+ *
+ * API Routes:
+ * - /api/chaintracks/* - Block headers and chain tracking
+ * - /api/beef/* - Raw transactions and proofs
+ * - /api/arcade/* - Transaction broadcasting
+ * - /api/bsv21/* - BSV21 token data
+ * - /api/txo/* - Transaction outputs
+ * - /api/owner/* - Address queries and sync
+ * - /api/ordfs/* - Content/inscription serving
  */
-export class OneSatServices implements WalletServices, ChainTracker {
+export class OneSatServices implements WalletServices {
   chain: Chain;
   readonly baseUrl: string;
+  private storage?: WalletStorageManager;
 
-  // Route clients (public for direct access)
+  // ===== API Clients =====
   readonly chaintracks: ChaintracksClient;
   readonly beef: BeefClient;
   readonly arcade: ArcadeClient;
@@ -80,37 +59,26 @@ export class OneSatServices implements WalletServices, ChainTracker {
   readonly ordfs: OrdfsClient;
   readonly bsv21: Bsv21Client;
 
-  private storage?: WalletStorageManager;
-  private activeSyncs = new Map<string, () => void>();
-  private listeners: {
-    [K in keyof OneSatServicesEvents]?: Set<
-      EventCallback<OneSatServicesEvents[K]>
-    >;
-  } = {};
-
   constructor(chain: Chain, baseUrl?: string, storage?: WalletStorageManager) {
     this.chain = chain;
     this.baseUrl =
       baseUrl ||
       (chain === "main"
-        ? "https://api.1sat.app/api"
-        : "https://testnet.api.1sat.app/api");
+        ? "http://localhost:8080"
+        : "https://testnet.api.1sat.app");
     this.storage = storage;
 
     const opts: ClientOptions = { timeout: 30000 };
-    this.chaintracks = new ChaintracksClient(
-      `${this.baseUrl}/chaintracks`,
-      opts,
-    );
-    this.beef = new BeefClient(`${this.baseUrl}/beef`, opts);
-    this.arcade = new ArcadeClient(`${this.baseUrl}/arcade`, opts);
-    this.txo = new TxoClient(`${this.baseUrl}/txo`, opts);
-    this.owner = new OwnerClient(`${this.baseUrl}/owner`, opts);
-    this.ordfs = new OrdfsClient(`${this.baseUrl}/ordfs`, opts);
-    this.bsv21 = new Bsv21Client(`${this.baseUrl}/bsv21`, opts);
+    this.chaintracks = new ChaintracksClient(this.baseUrl, opts);
+    this.beef = new BeefClient(this.baseUrl, opts);
+    this.arcade = new ArcadeClient(this.baseUrl, opts);
+    this.txo = new TxoClient(this.baseUrl, opts);
+    this.owner = new OwnerClient(this.baseUrl, opts);
+    this.ordfs = new OrdfsClient(this.baseUrl, opts);
+    this.bsv21 = new Bsv21Client(this.baseUrl, opts);
   }
 
-  // ===== Server Discovery =====
+  // ===== Utility Methods =====
 
   /**
    * Get list of enabled capabilities from the server
@@ -123,190 +91,22 @@ export class OneSatServices implements WalletServices, ChainTracker {
     return response.json();
   }
 
-  // ===== Event Emitter =====
-
-  on<K extends keyof OneSatServicesEvents>(
-    event: K,
-    callback: EventCallback<OneSatServicesEvents[K]>,
-  ): void {
-    if (!this.listeners[event]) {
-      (
-        this.listeners as Record<K, Set<EventCallback<OneSatServicesEvents[K]>>>
-      )[event] = new Set();
-    }
-    (this.listeners[event] as Set<EventCallback<OneSatServicesEvents[K]>>).add(
-      callback,
-    );
-  }
-
-  off<K extends keyof OneSatServicesEvents>(
-    event: K,
-    callback: EventCallback<OneSatServicesEvents[K]>,
-  ): void {
-    (
-      this.listeners[event] as
-        | Set<EventCallback<OneSatServicesEvents[K]>>
-        | undefined
-    )?.delete(callback);
-  }
-
-  emit<K extends keyof OneSatServicesEvents>(
-    event: K,
-    data: OneSatServicesEvents[K],
-  ): void {
-    for (const cb of this.listeners[event] ?? []) {
-      cb(data);
-    }
-  }
-
-  // ===== Sync Methods =====
-
-  private getSyncStorageKey(address: string): string {
-    return `1sat:sync:${address}`;
-  }
-
-  getSyncProgress(address: string): number {
-    return Number(localStorage.getItem(this.getSyncStorageKey(address)) || "0");
-  }
-
-  private setSyncProgress(address: string, score: number): void {
-    localStorage.setItem(this.getSyncStorageKey(address), score.toString());
-  }
-
-  syncAddress(address: string, handler: SyncOutputHandler): void {
-    this.stopSync(address);
-
-    const from = this.getSyncProgress(address);
-    this.emit("sync:start", { address, fromScore: from });
-
-    const queue: SyncOutput[] = [];
-    let processing = false;
-    let done = false;
-
-    const processQueue = async () => {
-      if (processing) return;
-      processing = true;
-
-      while (queue.length > 0) {
-        if (!this.activeSyncs.has(address)) return; // stopped
-        const output = queue.shift();
-        if (!output) continue;
-        try {
-          this.emit("sync:output", { address, output });
-          await handler(address, output);
-          this.setSyncProgress(address, output.score);
-        } catch (error) {
-          this.activeSyncs.delete(address);
-          this.emit("sync:error", {
-            address,
-            error: error instanceof Error ? error : new Error(String(error)),
-          });
-          return;
-        }
-      }
-
-      processing = false;
-
-      if (done) {
-        this.activeSyncs.delete(address);
-        this.emit("sync:complete", { address });
-      }
-    };
-
-    const unsubscribe = this.owner.sync(
-      address,
-      (output) => {
-        queue.push(output);
-        processQueue();
-      },
-      from,
-      () => {
-        done = true;
-        processQueue();
-      },
-      (error) => {
-        this.activeSyncs.delete(address);
-        this.emit("sync:error", { address, error });
-      },
-    );
-
-    this.activeSyncs.set(address, unsubscribe);
-  }
-
-  stopSync(address: string): void {
-    const unsubscribe = this.activeSyncs.get(address);
-    if (unsubscribe) {
-      unsubscribe();
-      this.activeSyncs.delete(address);
-    }
-  }
-
+  /**
+   * Close all client connections
+   */
   close(): void {
-    for (const unsubscribe of this.activeSyncs.values()) {
-      unsubscribe();
-    }
-    this.activeSyncs.clear();
     this.chaintracks.close();
   }
 
-  // ===== ChainTracker Interface =====
-
-  async currentHeight(): Promise<number> {
-    return this.chaintracks.currentHeight();
-  }
-
-  async isValidRootForHeight(root: string, height: number): Promise<boolean> {
-    return this.chaintracks.isValidRootForHeight(root, height);
-  }
-
-  // ===== WalletServices Interface =====
-
-  async getChainTracker(): Promise<ChainTracker> {
-    return this;
-  }
-
-  async getHeaderForHeight(height: number): Promise<number[]> {
-    return this.chaintracks.getHeaderBytes(height);
-  }
-
-  async getHeight(): Promise<number> {
-    return this.chaintracks.currentHeight();
-  }
-
-  async getBsvExchangeRate(): Promise<number> {
-    throw new Error("Exchange rate fetching not yet implemented");
-  }
-
-  async getFiatExchangeRate(
-    _currency: "USD" | "GBP" | "EUR",
-    _base?: "USD" | "GBP" | "EUR",
-  ): Promise<number> {
-    throw new Error("Fiat exchange rate not yet implemented");
-  }
+  // ===== WalletServices Interface (Required by wallet-toolbox) =====
 
   async getRawTx(txid: string, _useNext?: boolean): Promise<GetRawTxResult> {
-    // Check storage first
-    if (this.storage) {
-      const rawTx = await this.storage.runAsStorageProvider(async (sp) => {
-        return await sp.getRawTxOfKnownValidTransaction(txid);
-      });
-      if (rawTx) {
-        return {
-          txid,
-          name: "storage",
-          rawTx,
-        };
-      }
-    }
-
-    // Fetch from network
+    // This is a network-only call for the WalletServices interface.
+    // Wallet should check storage before calling this.
     try {
-      const rawTx = await this.beef.getRaw(txid);
-      return {
-        txid,
-        name: "1sat-api",
-        rawTx: Array.from(rawTx),
-      };
+      const beefBytes = await this.beef.getBeef(txid);
+      const tx = Transaction.fromBEEF(Array.from(beefBytes));
+      return { txid, name: "1sat-api", rawTx: Array.from(tx.toBinary()) };
     } catch (error) {
       return {
         txid,
@@ -318,6 +118,18 @@ export class OneSatServices implements WalletServices, ChainTracker {
     }
   }
 
+  async getChainTracker(): Promise<ChaintracksClient> {
+    return this.chaintracks;
+  }
+
+  async getHeaderForHeight(height: number): Promise<number[]> {
+    return this.chaintracks.getHeaderBytes(height);
+  }
+
+  async getHeight(): Promise<number> {
+    return this.chaintracks.currentHeight();
+  }
+
   async getMerklePath(
     txid: string,
     _useNext?: boolean,
@@ -325,11 +137,7 @@ export class OneSatServices implements WalletServices, ChainTracker {
     try {
       const proofBytes = await this.beef.getProof(txid);
       const merklePath = MerklePath.fromBinary(Array.from(proofBytes));
-
-      return {
-        name: "1sat-api",
-        merklePath,
-      };
+      return { name: "1sat-api", merklePath };
     } catch (error) {
       return {
         name: "1sat-api",
@@ -378,12 +186,7 @@ export class OneSatServices implements WalletServices, ChainTracker {
           results.push({
             name: "1sat-api",
             status: "success",
-            txidResults: [
-              {
-                txid: status.txid || txid,
-                status: "success",
-              },
-            ],
+            txidResults: [{ txid: status.txid || txid, status: "success" }],
           });
         } else if (
           status.txStatus === "REJECTED" ||
@@ -396,25 +199,14 @@ export class OneSatServices implements WalletServices, ChainTracker {
               status.txStatus,
               status.extraInfo || "Transaction rejected",
             ),
-            txidResults: [
-              {
-                txid,
-                status: "error",
-                data: status,
-              },
-            ],
+            txidResults: [{ txid, status: "error", data: status }],
           });
         } else {
           // Still processing - report as success since tx was accepted
           results.push({
             name: "1sat-api",
             status: "success",
-            txidResults: [
-              {
-                txid: status.txid || txid,
-                status: "success",
-              },
-            ],
+            txidResults: [{ txid: status.txid || txid, status: "success" }],
           });
         }
       } catch (error) {
@@ -425,12 +217,7 @@ export class OneSatServices implements WalletServices, ChainTracker {
             "NETWORK_ERROR",
             error instanceof Error ? error.message : "Unknown error",
           ),
-          txidResults: [
-            {
-              txid,
-              status: "error",
-            },
-          ],
+          txidResults: [{ txid, status: "error" }],
         });
       }
     }
@@ -438,9 +225,51 @@ export class OneSatServices implements WalletServices, ChainTracker {
     return results;
   }
 
+  async getBeefForTxid(txid: string): Promise<Beef> {
+    const beefBytes = await this.beef.getBeef(txid);
+    return Beef.fromBinary(Array.from(beefBytes));
+  }
+
   hashOutputScript(script: string): string {
     const scriptBin = Utils.toArray(script, "hex");
     return Utils.toHex(Hash.hash256(scriptBin).reverse());
+  }
+
+  getServicesCallHistory(_reset?: boolean): ServicesCallHistory {
+    const emptyHistory: ServiceCallHistory = {
+      serviceName: "",
+      historyByProvider: {},
+    };
+
+    return {
+      version: 1,
+      getMerklePath: { ...emptyHistory, serviceName: "getMerklePath" },
+      getRawTx: { ...emptyHistory, serviceName: "getRawTx" },
+      postBeef: { ...emptyHistory, serviceName: "postBeef" },
+      getUtxoStatus: { ...emptyHistory, serviceName: "getUtxoStatus" },
+      getStatusForTxids: { ...emptyHistory, serviceName: "getStatusForTxids" },
+      getScriptHashHistory: {
+        ...emptyHistory,
+        serviceName: "getScriptHashHistory",
+      },
+      updateFiatExchangeRates: {
+        ...emptyHistory,
+        serviceName: "updateFiatExchangeRates",
+      },
+    };
+  }
+
+  // ===== WalletServices Interface (Not Yet Implemented) =====
+
+  async getBsvExchangeRate(): Promise<number> {
+    throw new Error("getBsvExchangeRate not yet implemented");
+  }
+
+  async getFiatExchangeRate(
+    _currency: "USD" | "GBP" | "EUR",
+    _base?: "USD" | "GBP" | "EUR",
+  ): Promise<number> {
+    throw new Error("getFiatExchangeRate not yet implemented");
   }
 
   async getStatusForTxids(
@@ -478,34 +307,5 @@ export class OneSatServices implements WalletServices, ChainTracker {
     _txOrLockTime: string | number[] | Transaction | number,
   ): Promise<boolean> {
     throw new Error("nLockTimeIsFinal not yet implemented");
-  }
-
-  async getBeefForTxid(txid: string): Promise<Beef> {
-    const beefBytes = await this.beef.getBeef(txid);
-    return Beef.fromBinary(Array.from(beefBytes));
-  }
-
-  getServicesCallHistory(_reset?: boolean): ServicesCallHistory {
-    const emptyHistory: ServiceCallHistory = {
-      serviceName: "",
-      historyByProvider: {},
-    };
-
-    return {
-      version: 1,
-      getMerklePath: { ...emptyHistory, serviceName: "getMerklePath" },
-      getRawTx: { ...emptyHistory, serviceName: "getRawTx" },
-      postBeef: { ...emptyHistory, serviceName: "postBeef" },
-      getUtxoStatus: { ...emptyHistory, serviceName: "getUtxoStatus" },
-      getStatusForTxids: { ...emptyHistory, serviceName: "getStatusForTxids" },
-      getScriptHashHistory: {
-        ...emptyHistory,
-        serviceName: "getScriptHashHistory",
-      },
-      updateFiatExchangeRates: {
-        ...emptyHistory,
-        serviceName: "updateFiatExchangeRates",
-      },
-    };
   }
 }

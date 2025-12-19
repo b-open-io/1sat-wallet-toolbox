@@ -3,6 +3,7 @@ export {
   type IndexData,
   type IndexSummary,
   type ParseContext,
+  type ParseResult,
   type Txo,
 } from "./types";
 export type {
@@ -27,5 +28,3 @@ export { Bsv21Indexer, deriveFundAddress, type Bsv21 } from "./Bsv21Indexer";
 export { OrdLockIndexer, Listing } from "./OrdLockIndexer";
 export { OpNSIndexer } from "./OpNSIndexer";
 export { CosignIndexer, type CosignData } from "./CosignIndexer";
-
-export { TransactionParser } from "./TransactionParser";

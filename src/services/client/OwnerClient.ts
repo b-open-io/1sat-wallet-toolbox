@@ -18,7 +18,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class OwnerClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(baseUrl, options);
+    super(`${baseUrl}/api/owner`, options);
   }
 
   /**

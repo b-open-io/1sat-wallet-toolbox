@@ -1,5 +1,5 @@
 import { Cosign } from "@bsv/templates";
-import { type IndexData, Indexer, type ParseContext } from "./types";
+import { Indexer, type ParseResult, type Txo } from "./types";
 
 export interface CosignData {
   address: string;
@@ -17,19 +17,17 @@ export class CosignIndexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
-    const txo = ctx.txos[vout];
-    const lockingScript = ctx.tx.outputs[vout].lockingScript;
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
+    const lockingScript = txo.output.lockingScript;
 
     // Use template decode
     const decoded = Cosign.decode(lockingScript, this.network === "mainnet");
     if (!decoded) return;
 
-    txo.owner = decoded.address;
-
     return {
       data: decoded as CosignData,
       tags: [],
+      owner: decoded.address,
     };
   }
 }

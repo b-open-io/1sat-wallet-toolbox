@@ -19,9 +19,8 @@ export class Outpoint {
       this.txid = Utils.toHex(reader.read(32).reverse());
       this.vout = reader.readInt32LE();
     } else if (typeof txidOrOutpoint === "string") {
-      const [txid, vout] = txidOrOutpoint.split("_");
-      this.txid = txid;
-      this.vout = Number.parseInt(vout);
+      this.txid = txidOrOutpoint.substring(0, 64);
+      this.vout = Number.parseInt(txidOrOutpoint.substring(65), 10);
     } else if (typeof txidOrOutpoint === "object") {
       this.txid = txidOrOutpoint.txid;
       this.vout = txidOrOutpoint.vout;

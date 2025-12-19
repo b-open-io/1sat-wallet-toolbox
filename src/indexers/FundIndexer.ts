@@ -1,9 +1,10 @@
 import { parseAddress } from "./parseAddress";
 import {
-  type IndexData,
   type IndexSummary,
   Indexer,
   type ParseContext,
+  type ParseResult,
+  type Txo,
 } from "./types";
 
 /**
@@ -26,22 +27,21 @@ export class FundIndexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
-    const txo = ctx.txos[vout];
-    const script = ctx.tx.outputs[vout].lockingScript;
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
+    const script = txo.output.lockingScript;
+    const satoshis = BigInt(txo.output.satoshis || 0);
     const address = parseAddress(script, 0, this.network);
-    if (txo.satoshis < 2n) return;
-
-    txo.owner = address;
-    txo.basket = "fund";
+    if (satoshis < 2n) return;
 
     return {
       data: address,
       tags: [],
+      owner: address,
+      basket: "fund",
     };
   }
 
-  async summerize(ctx: ParseContext): Promise<IndexSummary | undefined> {
+  async summarize(ctx: ParseContext): Promise<IndexSummary | undefined> {
     let satsOut = 0n;
     let satsIn = 0n;
 
@@ -64,9 +64,8 @@ export class FundIndexer extends Indexer {
     // Calculate satoshis received to our addresses (outputs)
     satsIn = ctx.txos.reduce((acc, txo) => {
       if (!txo.data[this.tag]) return acc;
-      return (
-        acc + (txo.owner && this.owners.has(txo.owner) ? txo.satoshis : 0n)
-      );
+      const satoshis = BigInt(txo.output.satoshis || 0);
+      return acc + (txo.owner && this.owners.has(txo.owner) ? satoshis : 0n);
     }, 0n);
 
     const balance = Number(satsIn - satsOut);

@@ -79,7 +79,7 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
   private subscribers: Set<(header: BlockHeader) => void> = new Set();
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(baseUrl, options);
+    super(`${baseUrl}/api/chaintracks`, options);
   }
 
   /**

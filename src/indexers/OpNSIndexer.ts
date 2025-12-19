@@ -1,6 +1,6 @@
 import { Utils } from "@bsv/sdk";
 import type { Inscription } from "./InscriptionIndexer";
-import { type IndexData, Indexer, type ParseContext } from "./types";
+import { Indexer, type ParseResult, type Txo } from "./types";
 
 export class OpNSIndexer extends Indexer {
   tag = "opns";
@@ -13,12 +13,9 @@ export class OpNSIndexer extends Indexer {
     super(owners, network);
   }
 
-  async parse(ctx: ParseContext, vout: number): Promise<IndexData | undefined> {
-    const txo = ctx.txos[vout];
+  async parse(txo: Txo): Promise<ParseResult | undefined> {
     const insc = txo.data.insc?.data as Inscription;
     if (insc?.file?.type !== "application/op-ns") return;
-
-    txo.basket = "opns";
 
     const tags: string[] = [];
 
@@ -40,6 +37,7 @@ export class OpNSIndexer extends Indexer {
     return {
       data: insc,
       tags,
+      basket: "opns",
     };
   }
 }

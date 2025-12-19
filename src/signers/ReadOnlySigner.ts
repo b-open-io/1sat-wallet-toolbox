@@ -21,12 +21,12 @@ class ReadOnlyPrivateKey {
     return this.publicKey;
   }
 
-  toString(): never {
-    throw new Error("Cannot access private key in read-only mode");
+  toString(): string {
+    return this.publicKey.toString();
   }
 
-  toHex(): never {
-    throw new Error("Cannot access private key in read-only mode");
+  toHex(): string {
+    return this.publicKey.toString();
   }
 }
 
