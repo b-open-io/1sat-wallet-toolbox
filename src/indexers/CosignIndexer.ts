@@ -1,4 +1,4 @@
-import { Cosign } from "@bsv/templates";
+import { Cosign } from "@bopen-io/ts-templates";
 import { Indexer, type ParseResult, type Txo } from "./types";
 
 export interface CosignData {

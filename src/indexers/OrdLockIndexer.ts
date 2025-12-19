@@ -1,4 +1,4 @@
-import { OrdLock } from "@bsv/templates";
+import { OrdLock } from "@bopen-io/ts-templates";
 import {
   type IndexSummary,
   Indexer,

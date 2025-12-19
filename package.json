@@ -1,6 +1,6 @@
 {
   "name": "@1sat/wallet-toolbox",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "BSV wallet library extending @bsv/wallet-toolbox with 1Sat Ordinals protocol support",
   "author": "1Sat Team",
   "license": "MIT",
@@ -37,8 +37,8 @@
     "tester": "bun run build && bun run tester:build && bun ./tester/server.ts"
   },
   "dependencies": {
+    "@bopen-io/ts-templates": "^1.1.0",
     "@bsv/sdk": "1.9.24",
-    "@bsv/templates": "file:../ts-templates",
     "@bsv/wallet-toolbox": "^1.7.14",
     "buffer": "^6.0.3"
   },

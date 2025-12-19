@@ -186,6 +186,26 @@ const services = new OneSatServices("main", "https://ordfs.network");
 | `getBsv21TokenByTxid(tokenId, txid)` | Get BSV21 token data |
 | `getBsv21TokenDetails(tokenId)` | Get BSV21 token metadata (cached) |
 
+#### Available Clients
+
+OneSatServices exposes specialized API clients as public properties:
+
+| Client | Property | Purpose |
+|--------|----------|---------|
+| Chaintracks | `.chaintracks` | Block headers and chain tracking |
+| BEEF | `.beef` | Raw transactions and BEEF proofs |
+| Arcade | `.arcade` | Transaction broadcasting |
+| TXO | `.txo` | Transaction output queries |
+| Owner | `.owner` | Address queries and SSE sync |
+| OrdFS | `.ordfs` | Content and inscription metadata |
+| BSV21 | `.bsv21` | BSV21 token data |
+
+```typescript
+const services = new OneSatServices("main");
+const rawTx = await services.beef.getRawTx(txid);
+const metadata = await services.ordfs.getMetadata(outpoint);
+```
+
 ---
 
 ### ReadOnlySigner
@@ -242,25 +262,6 @@ Tags enable filtered queries via `listOutputs({ tags })`. Tags are only added fo
 
 ---
 
-### TransactionParser
-
-Runs indexers over transactions to extract basket/tags for wallet-toolbox storage.
-
-```typescript
-import { TransactionParser, FundIndexer, OriginIndexer } from "@1sat/wallet-toolbox";
-
-const parser = new TransactionParser(
-  [new FundIndexer(owners, "mainnet"), new OriginIndexer(owners, "mainnet", services)],
-  owners,
-  services
-);
-
-const result = await parser.parse(transaction, true);
-// result.outputs: ParsedOutput[] with vout, basket, tags, customInstructions
-```
-
----
-
 ## Project Status
 
 ### Completed
@@ -269,12 +270,12 @@ const result = await parser.parse(transaction, true);
 - [x] Read-only mode via public key
 - [x] OneSatServices (WalletServices implementation)
 - [x] All indexers migrated from yours-wallet
-- [x] TransactionParser for indexed ingestion
 - [x] `ingestTransaction()` method
 - [x] `syncAddress()` / `syncAll()` synchronization
 - [x] Event system for sync progress
 - [x] `broadcast()` method
 - [x] `getChainTracker()` implementation
+- [x] Modular API client architecture
 
 ### TODO
 
@@ -287,7 +288,6 @@ const result = await parser.parse(transaction, true);
   - [ ] `getScriptHashHistory()`
   - [ ] `hashToHeader()`
   - [ ] `nLockTimeIsFinal()`
-- [ ] Improve basket/tag extraction in TransactionParser
 - [ ] Tests
 - [ ] Integration with yours-wallet
 

@@ -1,5 +1,5 @@
 import { OP, Script, Utils } from "@bsv/sdk";
-import { Inscription as InscriptionTemplate } from "@bsv/templates";
+import { Inscription as InscriptionTemplate } from "@bopen-io/ts-templates";
 import { MapIndexer } from "./MapIndexer";
 import { parseAddress } from "./parseAddress";
 import {
