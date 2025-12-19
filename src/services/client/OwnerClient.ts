@@ -92,6 +92,60 @@ export class OwnerClient extends BaseClient {
   }
 
   /**
+   * Sync outputs for multiple owners via SSE stream.
+   * The server merges results from all owners in score order.
+   *
+   * @param owners - Array of addresses/owners to sync
+   * @param onOutput - Callback for each output
+   * @param from - Starting score (for pagination/resumption)
+   * @param onDone - Callback when sync completes (client should retry after delay)
+   * @param onError - Callback for errors
+   * @returns Unsubscribe function
+   */
+  syncMulti(
+    owners: string[],
+    onOutput: (output: SyncOutput) => void,
+    from?: number,
+    onDone?: () => void,
+    onError?: (error: Error) => void,
+  ): () => void {
+    // Build query string with multiple owner params
+    const params = new URLSearchParams();
+    for (const owner of owners) {
+      params.append("owner", owner);
+    }
+    if (from !== undefined) {
+      params.set("from", String(from));
+    }
+
+    const url = `${this.baseUrl}/sync?${params.toString()}`;
+    const eventSource = new EventSource(url);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const output = JSON.parse(event.data) as SyncOutput;
+        onOutput(output);
+      } catch (e) {
+        onError?.(e instanceof Error ? e : new Error(String(e)));
+      }
+    };
+
+    eventSource.addEventListener("done", () => {
+      eventSource.close();
+      onDone?.();
+    });
+
+    eventSource.onerror = () => {
+      eventSource.close();
+      onError?.(new Error("SSE connection error"));
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }
+
+  /**
    * Sync outputs as an async iterator.
    * Yields SyncOutput objects until the stream is done.
    */
@@ -106,6 +160,62 @@ export class OwnerClient extends BaseClient {
 
     const unsubscribe = this.sync(
       owner,
+      (output) => {
+        outputs.push(output);
+        resolve?.();
+      },
+      from,
+      () => {
+        done = true;
+        resolve?.();
+      },
+      (e) => {
+        error = e;
+        resolve?.();
+      },
+    );
+
+    try {
+      while (!done && !error) {
+        if (outputs.length > 0) {
+          const output = outputs.shift();
+          if (output) yield output;
+        } else {
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+        }
+      }
+
+      // Yield remaining outputs
+      while (outputs.length > 0) {
+        const output = outputs.shift();
+        if (output) yield output;
+      }
+
+      if (error) {
+        throw error;
+      }
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  /**
+   * Sync outputs for multiple owners as an async iterator.
+   * Yields SyncOutput objects until the stream is done.
+   */
+  async *syncMultiIterator(
+    owners: string[],
+    from?: number,
+  ): AsyncGenerator<SyncOutput, void, unknown> {
+    const outputs: SyncOutput[] = [];
+    let done = false;
+    let error: Error | null = null;
+    let resolve: (() => void) | null = null;
+
+    const unsubscribe = this.syncMulti(
+      owners,
       (output) => {
         outputs.push(output);
         resolve?.();

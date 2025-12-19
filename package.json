@@ -37,7 +37,7 @@
     "tester": "bun run build && bun run tester:build && bun ./tester/server.ts"
   },
   "dependencies": {
-    "@bsv/sdk": "^1.9.24",
+    "@bsv/sdk": "1.9.29",
     "@bsv/templates": "file:../ts-templates",
     "@bsv/wallet-toolbox": "^1.7.14",
     "buffer": "^6.0.3"

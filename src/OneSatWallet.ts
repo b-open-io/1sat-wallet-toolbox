@@ -50,6 +50,17 @@ export interface OneSatWalletEvents {
   };
   "sync:error": { address: string; error: Error };
   "sync:complete": { address: string };
+  // Multi-owner sync events
+  "syncAll:start": { addresses: string[]; fromScore: number };
+  "syncAll:output": { output: SyncOutput };
+  "syncAll:skipped": { outpoint: string; reason: string };
+  "syncAll:parsed": {
+    txid: string;
+    parseContext: ParseContext;
+    internalizedCount: number;
+  };
+  "syncAll:error": { error: Error };
+  "syncAll:complete": { addresses: string[] };
 }
 
 type EventCallback<T> = (event: T) => void;
@@ -108,6 +119,7 @@ export class OneSatWallet extends Wallet {
     [K in keyof OneSatWalletEvents]?: Set<EventCallback<OneSatWalletEvents[K]>>;
   } = {};
   private activeSyncs = new Map<string, () => void>();
+  private activeMultiSync: (() => void) | null = null;
 
   constructor(args: OneSatWalletArgs) {
     const isReadOnly = typeof args.rootKey === "string";
@@ -934,6 +946,9 @@ export class OneSatWallet extends Wallet {
    * Close the wallet and cleanup all active sync connections.
    */
   close(): void {
+    // Stop multi-owner sync
+    this.stopSyncAll();
+    // Stop individual address syncs
     for (const unsubscribe of this.activeSyncs.values()) {
       unsubscribe();
     }
@@ -942,9 +957,221 @@ export class OneSatWallet extends Wallet {
   }
 
   /**
-   * Start syncing all owner addresses.
+   * Start syncing all owner addresses using a single multi-owner SSE connection.
+   * This is more efficient than syncing each address individually.
+   *
+   * @param fromScore - Starting score (for pagination/resumption)
    */
-  syncAll(): void {
+  syncAll(fromScore = 0): void {
+    // Stop any existing multi-sync
+    this.stopSyncAll();
+
+    const addresses = Array.from(this.owners);
+    if (addresses.length === 0) {
+      return;
+    }
+
+    // For a single address, fall back to syncAddress for backwards compatibility
+    if (addresses.length === 1) {
+      this.syncAddress(addresses[0], fromScore);
+      return;
+    }
+
+    // Emit sync start event
+    this.emit("syncAll:start", { addresses, fromScore });
+
+    // Track txids seen during this sync session to avoid redundant DB lookups
+    const seenTxids = new Set<string>();
+
+    const processOutput = async (output: SyncOutput) => {
+      // Emit syncAll:output for each output received
+      this.emit("syncAll:output", { output });
+      const txid = output.outpoint.substring(0, 64);
+
+      // Check if we've already processed this txid in this session
+      if (seenTxids.has(txid)) {
+        this.emit("syncAll:skipped", {
+          outpoint: output.outpoint,
+          reason: "already processed in this session",
+        });
+        // Still need to check spend txid
+        if (output.spendTxid && !seenTxids.has(output.spendTxid)) {
+          await this.processSpendTxMulti(output, seenTxids);
+        }
+        return;
+      }
+
+      const vout = Number.parseInt(output.outpoint.substring(65), 10);
+      const hasOutput = await this.storage.runAsStorageProvider(async (sp) => {
+        const outputs = await sp.findOutputs({ partial: { txid, vout } });
+        return outputs.length > 0;
+      });
+
+      if (!hasOutput) {
+        if (output.spendTxid) {
+          // Already spent and we don't have the output - skip
+          seenTxids.add(txid);
+          this.emit("syncAll:skipped", {
+            outpoint: output.outpoint,
+            reason: "already spent, skipping historical output",
+          });
+          return;
+        }
+        // Unspent - fetch and ingest
+        const tx = await this.loadTransaction(txid);
+        const result = await this.ingestTransaction(tx, "1sat-sync");
+        seenTxids.add(txid);
+        this.emit("syncAll:parsed", {
+          txid,
+          parseContext: result.parseContext,
+          internalizedCount: result.internalizedCount,
+        });
+      } else {
+        seenTxids.add(txid);
+        if (output.spendTxid) {
+          await this.processSpendTxMulti(output, seenTxids);
+        } else {
+          this.emit("syncAll:skipped", {
+            outpoint: output.outpoint,
+            reason: "already have output in storage",
+          });
+        }
+      }
+    };
+
+    // Use owner.syncMulti from services
+    const unsubscribe = this.services.owner.syncMulti(
+      addresses,
+      (output) => {
+        processOutput(output);
+      },
+      fromScore,
+      () => {
+        // onDone
+        this.activeMultiSync = null;
+        this.emit("syncAll:complete", { addresses });
+      },
+      (error) => {
+        // onError
+        this.activeMultiSync = null;
+        this.emit("syncAll:error", { error });
+      },
+    );
+
+    this.activeMultiSync = unsubscribe;
+  }
+
+  /**
+   * Process a spend transaction during multi-owner sync.
+   * Only marks our output as spent - doesn't ingest the spend tx.
+   */
+  private async processSpendTxMulti(
+    output: SyncOutput,
+    seenTxids: Set<string>,
+  ): Promise<void> {
+    if (!output.spendTxid || seenTxids.has(output.spendTxid)) {
+      return;
+    }
+
+    // Parse the outpoint to get txid and vout
+    const spentTxid = output.outpoint.substring(0, 64);
+    const spentVout = Number.parseInt(output.outpoint.substring(65), 10);
+
+    // Check if we have this output and it's not already marked spent
+    const userId = await this.storage.getUserId();
+    const outputRecord = await this.storage.runAsStorageProvider(async (sp) => {
+      const outputs = await sp.findOutputs({
+        partial: { userId, txid: spentTxid, vout: spentVout },
+      });
+      return outputs.length > 0 ? outputs[0] : null;
+    });
+
+    // Skip if we don't have this output or it's already spent
+    if (!outputRecord || !outputRecord.spendable) {
+      seenTxids.add(output.spendTxid);
+      this.emit("syncAll:skipped", {
+        outpoint: output.outpoint,
+        reason: outputRecord ? "already marked spent" : "output not in wallet",
+      });
+      return;
+    }
+
+    // Try to load spend tx from database first
+    let spendTx: Transaction | null = null;
+    const existingTx = await this.storage.runAsStorageProvider(async (sp) => {
+      const txs = await sp.findTransactions({
+        partial: { userId, txid: output.spendTxid },
+      });
+      return txs.length > 0 ? txs[0] : null;
+    });
+
+    if (existingTx?.rawTx) {
+      // Already in database with proof - no need to verify again
+      spendTx = Transaction.fromBinary(existingTx.rawTx);
+    } else {
+      // Not in database - fetch from network and verify
+      const beefBytes = await this.services.beef.getBeef(output.spendTxid);
+      spendTx = Transaction.fromBEEF(Array.from(beefBytes));
+
+      // Verify the transaction using SPV
+      const chainTracker = await this.services.getChainTracker();
+      const isValid = await spendTx.verify(chainTracker);
+      if (!isValid) {
+        this.emit("syncAll:error", {
+          error: new Error(
+            `Spend tx ${output.spendTxid} failed SPV verification`,
+          ),
+        });
+        return;
+      }
+    }
+
+    // Verify our outpoint is in the spend tx inputs
+    const inputFound = spendTx.inputs.some(
+      (input) =>
+        input.sourceTXID === spentTxid && input.sourceOutputIndex === spentVout,
+    );
+    if (!inputFound) {
+      this.emit("syncAll:error", {
+        error: new Error(
+          `Outpoint ${output.outpoint} not found in spend tx ${output.spendTxid} inputs`,
+        ),
+      });
+      return;
+    }
+
+    // Mark our output as spent
+    seenTxids.add(output.spendTxid);
+    const outputId = outputRecord.outputId;
+    if (outputId) {
+      await this.storage.runAsStorageProvider(async (sp) => {
+        await sp.updateOutput(outputId, {
+          spendable: false,
+        });
+      });
+    }
+
+    this.emit("syncAll:skipped", {
+      outpoint: output.outpoint,
+      reason: "marked as spent",
+    });
+  }
+
+  /**
+   * Stop the multi-owner sync.
+   */
+  stopSyncAll(): void {
+    if (this.activeMultiSync) {
+      this.activeMultiSync();
+      this.activeMultiSync = null;
+    }
+  }
+
+  /**
+   * Start syncing each owner address individually.
+   * For most cases, use syncAll() instead which uses a single connection.
+   */
+  syncEach(): void {
     for (const addr of this.owners) {
       this.syncAddress(addr);
     }

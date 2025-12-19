@@ -64,7 +64,7 @@ export class OneSatServices implements WalletServices {
     this.baseUrl =
       baseUrl ||
       (chain === "main"
-        ? "http://localhost:8080"
+        ? "https://1sat.shruggr.cloud"
         : "https://testnet.api.1sat.app");
     this.storage = storage;
 
