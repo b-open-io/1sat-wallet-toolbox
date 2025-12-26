@@ -189,6 +189,7 @@ export class OriginIndexer extends Indexer {
           }
 
           // If no inscription on current output, use metadata from source
+          // and potentially fetch text content
           if (!origin.insc) {
             origin.insc = {
               file: {
@@ -198,6 +199,24 @@ export class OriginIndexer extends Indexer {
                 content: [],
               },
             };
+
+            // Fetch text content if it qualifies
+            const contentType = metadata.contentType.toLowerCase();
+            const isTextContent =
+              contentType.startsWith("text/") ||
+              contentType === "application/json";
+            if (isTextContent && metadata.contentLength <= 1000) {
+              try {
+                const { data } = await this.services.ordfs.getContent(
+                  origin.outpoint || sourceOutpoint,
+                );
+                if (data) {
+                  originData.content = new TextDecoder().decode(data);
+                }
+              } catch {
+                // Ignore content fetch errors
+              }
+            }
           }
         } catch (e) {
           if (e instanceof HttpError && e.status === 404) {
@@ -250,6 +269,14 @@ export class OriginIndexer extends Indexer {
           const category = baseType.split("/")[0];
           originData.tags.push(`type:${category}`);
           originData.tags.push(`type:${baseType}`);
+        }
+        // Extract name from map data
+        const name = (origin.map?.name ??
+          (origin.map?.subTypeData as Record<string, unknown>)?.name) as
+          | string
+          | undefined;
+        if (name) {
+          originData.tags.push(`name:${name}`);
         }
       }
     }

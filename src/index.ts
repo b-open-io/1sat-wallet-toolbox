@@ -11,9 +11,18 @@ export {
   type IngestResult,
 } from "./OneSatWallet";
 export { OneSatServices, type SyncOutput } from "./services/OneSatServices";
-export type { OrdfsMetadata, Capability } from "./services/types";
+export type {
+  OrdfsMetadata,
+  OrdfsContentOptions,
+  OrdfsContentResponse,
+  OrdfsResponseHeaders,
+  Capability,
+} from "./services/types";
 export * from "./services/client";
 export { ReadOnlySigner } from "./signers/ReadOnlySigner";
 
 // Indexers
 export * from "./indexers";
+
+// Sync Queue
+export * from "./sync";

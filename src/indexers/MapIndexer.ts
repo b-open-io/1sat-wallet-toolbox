@@ -1,5 +1,5 @@
-import { OP, Script, Utils } from "@bsv/sdk";
 import { MAP_PREFIX } from "@bopen-io/ts-templates";
+import { OP, Script, Utils } from "@bsv/sdk";
 import { Indexer, type ParseResult, type Txo } from "./types";
 
 export class MapIndexer extends Indexer {
@@ -27,7 +27,9 @@ export class MapIndexer extends Indexer {
     while (chunks.length) {
       if (Utils.toUTF8(chunks[0]?.data || []) === MAP_PREFIX) {
         const map = MapIndexer.parseMap(new Script(chunks), 1);
-        return map ? { data: map, tags: [] } : undefined;
+        const name = (map?.name ?? (map?.subTypeData as Record<string, unknown>)?.name ?? 'Unknown') as string;
+        const tags = name ? [`name:${name}`] : []
+        return map ? { data: map, tags } : undefined;
       }
 
       const pipePos = chunks.findIndex(

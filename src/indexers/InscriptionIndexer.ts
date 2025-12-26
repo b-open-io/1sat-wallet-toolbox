@@ -1,5 +1,5 @@
-import { OP, Script, Utils } from "@bsv/sdk";
 import { Inscription as InscriptionTemplate } from "@bopen-io/ts-templates";
+import { OP, Script, Utils } from "@bsv/sdk";
 import { MapIndexer } from "./MapIndexer";
 import { parseAddress } from "./parseAddress";
 import {
@@ -91,6 +91,19 @@ export class InscriptionIndexer extends Indexer {
       fields: {},
     };
 
+    // Extract text content if it's a text-based inscription and small enough
+    let content: string | undefined;
+    const contentType = decoded.file.type.toLowerCase();
+    const isTextContent =
+      contentType.startsWith("text/") || contentType === "application/json";
+    if (isTextContent && decoded.file.size <= 1000) {
+      try {
+        content = new TextDecoder().decode(decoded.file.content);
+      } catch {
+        // Ignore decoding errors
+      }
+    }
+
     // Convert parent outpoint to string format
     if (decoded.parent) {
       try {
@@ -116,6 +129,7 @@ export class InscriptionIndexer extends Indexer {
       data: insc,
       tags: [],
       owner,
+      content,
     };
   }
 

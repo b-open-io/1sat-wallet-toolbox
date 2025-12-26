@@ -1,789 +1,606 @@
-import { PrivateKey } from "@bsv/sdk";
 import { WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
-import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
 import { StorageIdb } from "@bsv/wallet-toolbox/mobile/out/src/storage/StorageIdb";
-import { OneSatWallet } from "../../src/index";
-
-// DOM Elements
-const indexerUrlInput = document.getElementById(
-  "indexer-url",
-) as HTMLInputElement;
-const chainSelect = document.getElementById("chain") as HTMLSelectElement;
-const addressInput = document.getElementById("address") as HTMLInputElement;
-const syncBtn = document.getElementById("sync-btn") as HTMLButtonElement;
-const stopBtn = document.getElementById("stop-btn") as HTMLButtonElement;
-const resyncBtn = document.getElementById("resync-btn") as HTMLButtonElement;
-const resetProgressBtn = document.getElementById(
-  "reset-progress-btn",
-) as HTMLButtonElement;
-const clearStorageBtn = document.getElementById(
-  "clear-storage-btn",
-) as HTMLButtonElement;
-const syncProgressInfo = document.getElementById(
-  "sync-progress-info",
-) as HTMLDivElement;
-const txidInput = document.getElementById("txid") as HTMLInputElement;
-const parseTxBtn = document.getElementById("parse-tx-btn") as HTMLButtonElement;
-const statusBox = document.getElementById("status") as HTMLDivElement;
-const progressBar = document.getElementById("progress-bar") as HTMLDivElement;
-const progressText = document.getElementById("progress-text") as HTMLDivElement;
-const logsBox = document.getElementById("logs") as HTMLDivElement;
-const dataDisplay = document.getElementById("data-display") as HTMLDivElement;
-const listOutputsBtn = document.getElementById(
-  "list-outputs-btn",
-) as HTMLButtonElement;
-const listActionsBtn = document.getElementById(
-  "list-actions-btn",
-) as HTMLButtonElement;
-const showBasketsBtn = document.getElementById(
-  "show-baskets-btn",
-) as HTMLButtonElement;
+import { OneSatWallet } from "../../src/OneSatWallet";
+import { IndexedDbSyncQueue } from "../../src/sync/IndexedDbSyncQueue";
+import type { SyncQueueItemStatus, SyncQueueStats, SyncState } from "../../src/sync/types";
 
 // State
+interface AppState {
+  page: "login" | "dashboard";
+  identityKey: string;
+  addresses: string[];
+  chain: "main" | "test";
+  apiUrl: string;
+  isSyncing: boolean;
+  isStreamActive: boolean;
+  isProcessorActive: boolean;
+}
+
+const state: AppState = {
+  page: "login",
+  identityKey: "02403bbec3576b7852586f2e79ea7297f313a0c2f1cd63d26b9996aed4a9b710d9",
+  addresses: [
+    "13AGuUcJKJm5JaT9qssFxK8DETo3tAaa66",
+    "1AjdTTSvxTde1FtMjwSuyNqvwiwjmBAjD1",
+    "1FDHUkNu5QLH1XhdjJ3tpcEVSetB5QhnCZ",
+  ],
+  chain: "main",
+  apiUrl: "http://localhost:8080",
+  isSyncing: false,
+  isStreamActive: false,
+  isProcessorActive: false,
+};
+
+// Instances (initialized on dashboard)
+let syncQueue: IndexedDbSyncQueue | null = null;
 let wallet: OneSatWallet | null = null;
 let storage: WalletStorageManager | null = null;
-let isSyncing = false;
+let statsInterval: ReturnType<typeof setInterval> | null = null;
 
-// Logging - batched updates to prevent DOM thrashing
-const MAX_LOG_ENTRIES = 200;
-const LOG_FLUSH_INTERVAL = 100; // ms
-let logBuffer: { message: string; type: string; time: string }[] = [];
-let logFlushScheduled = false;
+const app = document.getElementById("app");
+if (!app) throw new Error("Missing #app element");
 
-function flushLogs() {
-  if (logBuffer.length === 0) return;
-
-  const fragment = document.createDocumentFragment();
-  for (const { message, type, time } of logBuffer) {
-    const entry = document.createElement("div");
-    entry.className = `log-entry ${type}`;
-    entry.innerHTML = `<span class="log-time">${time}</span>${escapeHtml(message)}`;
-    fragment.appendChild(entry);
-  }
-  logsBox.appendChild(fragment);
-  logBuffer = [];
-
-  // Remove old entries
-  while (logsBox.children.length > MAX_LOG_ENTRIES && logsBox.firstChild) {
-    logsBox.removeChild(logsBox.firstChild);
+function render() {
+  // Cleanup intervals
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
   }
 
-  logsBox.scrollTop = logsBox.scrollHeight;
-  logFlushScheduled = false;
-}
-
-function log(
-  message: string,
-  type: "info" | "success" | "error" | "tx" = "info",
-) {
-  const time = new Date().toLocaleTimeString();
-  logBuffer.push({ message, type, time });
-
-  if (!logFlushScheduled) {
-    logFlushScheduled = true;
-    setTimeout(flushLogs, LOG_FLUSH_INTERVAL);
-  }
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function setStatus(
-  message: string,
-  type: "syncing" | "success" | "error" | "" = "",
-) {
-  statusBox.textContent = message;
-  statusBox.className = `status-box ${type}`;
-}
-
-function setProgress(percent: number, text = "") {
-  progressBar.style.width = `${percent}%`;
-  progressText.textContent = text;
-}
-
-function getSyncStorageKey(address: string): string {
-  return `1sat:sync:${address}`;
-}
-
-function getSyncProgress(address: string): number {
-  return Number(localStorage.getItem(getSyncStorageKey(address)) || "0");
-}
-
-function updateSyncProgressInfo() {
-  const address = addressInput.value.trim();
-  if (!address) {
-    syncProgressInfo.textContent = "";
-    return;
-  }
-  const progress = getSyncProgress(address);
-  if (progress > 0) {
-    syncProgressInfo.textContent = `Last sync score: ${progress.toFixed(0)}`;
+  if (state.page === "login") {
+    renderLogin();
   } else {
-    syncProgressInfo.textContent = "No previous sync";
+    renderDashboard();
   }
 }
 
-function resetSyncProgress() {
-  const address = addressInput.value.trim();
-  if (!address) {
-    setStatus("Please enter an address", "error");
-    return;
-  }
-  localStorage.removeItem(getSyncStorageKey(address));
-  log(`Reset sync progress for ${address}`, "success");
-  updateSyncProgressInfo();
-}
-
-async function fullResync() {
-  const address = addressInput.value.trim();
-  if (!address) {
-    setStatus("Please enter an address", "error");
-    return;
-  }
-
-  // Reset progress first
-  localStorage.removeItem(getSyncStorageKey(address));
-  log("Reset sync progress for full resync", "info");
-  updateSyncProgressInfo();
-
-  // Then start sync
-  await syncAddress();
-}
-
-// Initialize wallet
-async function initWallet(address: string): Promise<OneSatWallet> {
-  const chain = chainSelect.value as Chain;
-  const onesatUrl = indexerUrlInput.value.trim();
-
-  log(`Initializing wallet for chain: ${chain}`);
-  log(`1Sat API URL: ${onesatUrl}`);
-
-  // Generate a random key for testing
-  const rootKey = PrivateKey.fromRandom();
-  const identityKey = rootKey.toPublicKey().toString();
-
-  // Create IDB storage with required options
-  const storageProvider = new StorageIdb({
-    chain,
-    feeModel: { model: "sat/kb", value: 1 },
-    commissionSatoshis: 0,
-  });
-
-  // Migrate storage before first access (initializes the IndexedDB database)
-  await storageProvider.migrate("1sat-wallet", identityKey);
-
-  // Initialize the storage manager with the identity key
-  storage = new WalletStorageManager(identityKey, storageProvider);
-
-  const walletInstance = new OneSatWallet({
-    rootKey,
-    storage,
-    chain,
-    owners: new Set([address]),
-    onesatUrl,
-  });
-
-  // Set up event listeners on the wallet
-  let outputCount = 0;
-
-  walletInstance.on("sync:start", (event) => {
-    log(
-      `Sync started for ${event.address} from score ${event.fromScore}`,
-      "info",
-    );
-    setStatus("Syncing...", "syncing");
-    setProgress(0, "Starting sync...");
-    outputCount = 0;
-    stopBtn.disabled = false;
-  });
-
-  walletInstance.on("sync:output", (event) => {
-    outputCount++;
-    const outpoint = event.output.outpoint;
-    const spent = event.output.spendTxid ? " (spent)" : "";
-    log(`Output ${outputCount}: ${outpoint}${spent}`, "tx");
-    setProgress(
-      0,
-      `Processing output ${outputCount} (score: ${event.output.score.toFixed(0)})`,
-    );
-  });
-
-  walletInstance.on("sync:error", (event) => {
-    log(`Error syncing ${event.address}: ${event.error.message}`, "error");
-    setStatus(`Error: ${event.error.message}`, "error");
-    stopBtn.disabled = true;
-    isSyncing = false;
-    syncBtn.disabled = false;
-  });
-
-  walletInstance.on("sync:complete", (event) => {
-    log(
-      `Sync complete for ${event.address}. Processed ${outputCount} outputs.`,
-      "success",
-    );
-    setStatus(`Sync complete! Processed ${outputCount} outputs.`, "success");
-    setProgress(100, "Complete!");
-    isSyncing = false;
-    syncBtn.disabled = false;
-    stopBtn.disabled = true;
-  });
-
-  walletInstance.on("sync:skipped", (event) => {
-    log(`SKIPPED ${event.outpoint}: ${event.reason}`, "info");
-  });
-
-  walletInstance.on("sync:parsed", (event) => {
-    const ctx = event.parseContext;
-
-    for (const txo of ctx.txos) {
-      const indexers = Object.keys(txo.data).join(", ") || "none";
-      log(
-        `PARSED ${txo.outpoint.toString()} -> basket="${txo.basket || ""}" owner=${txo.owner || "none"} indexers=[${indexers}]`,
-        txo.owner ? "success" : "info",
-      );
-    }
-
-    log(
-      `TX ${event.txid}: ${event.internalizedCount}/${ctx.txos.length} outputs internalized`,
-      "info",
-    );
-  });
-
-  return walletInstance;
-}
-
-// Sync address
-async function syncAddress() {
-  const address = addressInput.value.trim();
-  if (!address) {
-    setStatus("Please enter an address", "error");
-    return;
-  }
-
-  // Stop any existing sync before starting a new one
-  if (isSyncing && wallet) {
-    log("Stopping existing sync...", "info");
-    wallet.stopSync(addressInput.value.trim());
-  }
-
-  isSyncing = true;
-  syncBtn.disabled = true;
-  logsBox.innerHTML = "";
-
-  try {
-    log(`Starting sync for address: ${address}`);
-    wallet = await initWallet(address);
-    stopBtn.disabled = false;
-    // syncAddress runs in background via SSE - completion handled by sync:complete event
-    wallet.syncAddress(address);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`Sync failed: ${message}`, "error");
-    setStatus(`Sync failed: ${message}`, "error");
-    console.error("Sync error:", error);
-    isSyncing = false;
-    syncBtn.disabled = false;
-  }
-}
-
-// Clear storage
-async function clearStorage() {
-  const chain = chainSelect.value;
-  const dbName = `1sat-sync-test-${chain}`;
-
-  try {
-    // Clear localStorage sync keys
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith("1sat:sync:")) {
-        keysToRemove.push(key);
-      }
-    }
-    for (const key of keysToRemove) {
-      localStorage.removeItem(key);
-    }
-
-    // Delete IndexedDB
-    await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.deleteDatabase(dbName);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-
-    wallet = null;
-    storage = null;
-    log(`Cleared storage for ${chain}`, "success");
-    setStatus("Storage cleared", "success");
-    setProgress(0, "");
-    dataDisplay.innerHTML =
-      '<p class="placeholder">Storage cleared - sync again to see data</p>';
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`Failed to clear storage: ${message}`, "error");
-  }
-}
-
-// List outputs
-async function listOutputs() {
-  if (!wallet) {
-    dataDisplay.innerHTML =
-      '<p class="placeholder">No wallet initialized. Click Sync first.</p>';
-    return;
-  }
-
-  try {
-    const result = await wallet.listOutputs({
-      basket: "default",
-      include: "entire transactions",
-      limit: 100,
-    });
-
-    if (result.outputs.length === 0) {
-      // Try with specific baskets
-      const baskets = ["1sat", "bsv21", "lock", "fund"];
-      let allOutputs: typeof result.outputs = [];
-
-      for (const basket of baskets) {
-        try {
-          const basketResult = await wallet.listOutputs({
-            basket,
-            include: "entire transactions",
-            limit: 100,
-          });
-          allOutputs = [...allOutputs, ...basketResult.outputs];
-        } catch {
-          // Basket might not exist
-        }
-      }
-
-      if (allOutputs.length === 0) {
-        dataDisplay.innerHTML =
-          '<p class="placeholder">No outputs found in wallet</p>';
-        return;
-      }
-
-      result.outputs = allOutputs;
-    }
-
-    let html = `<h3>Outputs (${result.outputs.length})</h3>`;
-    html += '<div class="outputs-list">';
-
-    for (const output of result.outputs) {
-      const txid = output.outpoint.substring(0, 64);
-      html += `
-        <div class="data-item">
-          <div class="data-item-header">
-            <div class="data-item-info">
-              <div><span class="label">Outpoint:</span><span class="value">${output.outpoint}</span></div>
-            </div>
-            <button class="parse-btn" onclick="parseAndShowModal('${txid}')">Parse TX</button>
-          </div>
-          <div><span class="label">Satoshis:</span><span class="value">${output.satoshis}</span></div>
-          <div><span class="label">Spendable:</span><span class="value">${output.spendable}</span></div>
-          ${output.tags?.length ? `<div><span class="label">Tags:</span>${output.tags.map((t) => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+function renderLogin() {
+  app.innerHTML = `
+    <div class="login-page">
+      <div class="login-container">
+        <h1>1Sat Wallet Tester</h1>
+        
+        <div class="form-group">
+          <label for="api-url">API URL</label>
+          <input 
+            type="text" 
+            id="api-url" 
+            value="${state.apiUrl}"
+            placeholder="http://localhost:8080/api"
+          />
         </div>
-      `;
-    }
 
-    html += "</div>";
-    dataDisplay.innerHTML = html;
-    log(`Listed ${result.outputs.length} outputs`, "info");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    dataDisplay.innerHTML = `<p class="placeholder">Error listing outputs: ${escapeHtml(message)}</p>`;
-    log(`Failed to list outputs: ${message}`, "error");
-    console.error("List outputs error:", error);
-  }
-}
-
-// List actions
-async function listActions() {
-  if (!wallet) {
-    dataDisplay.innerHTML =
-      '<p class="placeholder">No wallet initialized. Click Sync first.</p>';
-    return;
-  }
-
-  try {
-    const result = await wallet.listActions({
-      labels: [],
-      includeLabels: true,
-      includeInputs: true,
-      includeOutputs: true,
-      limit: 50,
-    });
-
-    if (result.actions.length === 0) {
-      dataDisplay.innerHTML =
-        '<p class="placeholder">No actions found in wallet</p>';
-      return;
-    }
-
-    let html = `<h3>Actions/Transactions (${result.actions.length})</h3>`;
-    html += '<div class="actions-list">';
-
-    for (const action of result.actions) {
-      html += `
-        <div class="data-item">
-          <div class="data-item-header">
-            <div class="data-item-info">
-              <div><span class="label">TxID:</span><span class="value">${action.txid}</span></div>
-            </div>
-            <button class="parse-btn" onclick="parseAndShowModal('${action.txid}')">Parse TX</button>
-          </div>
-          <div><span class="label">Description:</span><span class="value">${escapeHtml(action.description)}</span></div>
-          <div><span class="label">Status:</span><span class="value">${action.status}</span></div>
-          <div><span class="label">Satoshis:</span><span class="value">${action.satoshis}</span></div>
-          ${action.labels?.length ? `<div><span class="label">Labels:</span>${action.labels.map((l) => `<span class="basket-badge">${escapeHtml(l)}</span>`).join("")}</div>` : ""}
-          <div><span class="label">Inputs:</span><span class="value">${action.inputs?.length || 0}</span></div>
-          <div><span class="label">Outputs:</span><span class="value">${action.outputs?.length || 0}</span></div>
+        <div class="form-group">
+          <label for="chain">Network</label>
+          <select id="chain">
+            <option value="main" ${state.chain === "main" ? "selected" : ""}>Mainnet</option>
+            <option value="test" ${state.chain === "test" ? "selected" : ""}>Testnet</option>
+          </select>
         </div>
-      `;
-    }
 
-    html += "</div>";
-    dataDisplay.innerHTML = html;
-    log(`Listed ${result.actions.length} actions`, "info");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    dataDisplay.innerHTML = `<p class="placeholder">Error listing actions: ${escapeHtml(message)}</p>`;
-    log(`Failed to list actions: ${message}`, "error");
-    console.error("List actions error:", error);
-  }
-}
-
-// Show baskets summary
-async function showBaskets() {
-  if (!storage) {
-    dataDisplay.innerHTML =
-      '<p class="placeholder">No storage initialized. Sync an address first.</p>';
-    return;
-  }
-
-  try {
-    // Query storage directly for raw data
-    const outputs = await storage.runAsStorageProvider(async (sp) => {
-      return await sp.findOutputs({ partial: {} });
-    });
-
-    const txs = await storage.runAsStorageProvider(async (sp) => {
-      return await sp.findTransactions({ partial: {} });
-    });
-
-    // Group outputs by basket
-    const basketCounts = new Map<string, number>();
-    const basketSatoshis = new Map<string, number>();
-
-    for (const output of outputs) {
-      const basket = output.basketId?.toString() || "unknown";
-      basketCounts.set(basket, (basketCounts.get(basket) || 0) + 1);
-      basketSatoshis.set(
-        basket,
-        (basketSatoshis.get(basket) || 0) + (output.satoshis || 0),
-      );
-    }
-
-    let html = "<h3>Storage Summary</h3>";
-    html += `
-      <div class="data-item">
-        <div><span class="label">Total Transactions:</span><span class="value">${txs.length}</span></div>
-        <div><span class="label">Total Outputs:</span><span class="value">${outputs.length}</span></div>
-      </div>
-    `;
-
-    html += "<h3>Baskets</h3>";
-    if (basketCounts.size === 0) {
-      html += '<p class="placeholder">No baskets found</p>';
-    } else {
-      html += '<div class="baskets-list">';
-      for (const [basket, count] of basketCounts) {
-        const sats = basketSatoshis.get(basket) || 0;
-        html += `
-          <div class="data-item">
-            <div><span class="basket-badge">${escapeHtml(basket)}</span></div>
-            <div><span class="label">Outputs:</span><span class="value">${count}</span></div>
-            <div><span class="label">Total Satoshis:</span><span class="value">${sats.toLocaleString()}</span></div>
-          </div>
-        `;
-      }
-      html += "</div>";
-    }
-
-    // Show raw output data
-    html += "<h3>Raw Outputs</h3>";
-    html += '<div class="outputs-raw">';
-    for (const output of outputs.slice(0, 20)) {
-      html += `
-        <div class="data-item">
-          <pre>${escapeHtml(JSON.stringify(output, null, 2))}</pre>
+        <div class="form-group">
+          <label for="identity-key">Identity Key (Public Key Hex)</label>
+          <input 
+            type="text" 
+            id="identity-key" 
+            placeholder="02abc123..."
+            value="${state.identityKey}"
+          />
         </div>
-      `;
-    }
-    if (outputs.length > 20) {
-      html += `<p class="placeholder">... and ${outputs.length - 20} more outputs</p>`;
-    }
-    html += "</div>";
 
-    dataDisplay.innerHTML = html;
-    log(
-      `Found ${outputs.length} outputs in ${basketCounts.size} baskets`,
-      "info",
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    dataDisplay.innerHTML = `<p class="placeholder">Error querying storage: ${escapeHtml(message)}</p>`;
-    log(`Failed to query storage: ${message}`, "error");
-    console.error("Show baskets error:", error);
-  }
-}
-
-// Parse single transaction
-async function parseTx() {
-  const txid = txidInput.value.trim();
-  if (!txid) {
-    setStatus("Please enter a transaction ID", "error");
-    return;
-  }
-
-  if (txid.length !== 64) {
-    setStatus("Invalid txid - must be 64 hex characters", "error");
-    return;
-  }
-
-  logsBox.innerHTML = "";
-  log(`Parsing transaction: ${txid}`, "info");
-  setStatus("Parsing...", "syncing");
-
-  try {
-    // Initialize wallet if needed (with empty owner set for parsing)
-    if (!wallet) {
-      const address =
-        addressInput.value.trim() || "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"; // dummy address
-      wallet = await initWallet(address);
-    }
-
-    const ctx = await wallet.parseTransaction(txid);
-
-    log(
-      `Parse complete - ${ctx.txos.length} outputs, ${ctx.spends.length} spends`,
-      "success",
-    );
-
-    // Log each txo
-    for (const txo of ctx.txos) {
-      const indexers = Object.keys(txo.data).join(", ") || "none";
-      const isOwned = !!(txo.owner && wallet.services);
-      log(
-        `OUTPUT ${txo.outpoint.toString()} -> owner=${txo.owner || "none"} basket="${txo.basket || ""}" indexers=[${indexers}]`,
-        isOwned ? "success" : "info",
-      );
-
-      // Log detailed indexer data
-      for (const [tag, data] of Object.entries(txo.data)) {
-        log(`  [${tag}]: ${JSON.stringify(data)}`, "info");
-      }
-    }
-
-    // Log spends
-    if (ctx.spends.length > 0) {
-      log(`SPENDS (${ctx.spends.length}):`, "info");
-      for (const spend of ctx.spends) {
-        const indexers = Object.keys(spend.data).join(", ") || "none";
-        log(`  ${spend.outpoint.toString()} -> indexers=[${indexers}]`, "info");
-      }
-    }
-
-    // Show summary if present
-    if (Object.keys(ctx.summary).length > 0) {
-      log(`SUMMARY: ${JSON.stringify(ctx.summary, null, 2)}`, "info");
-    }
-
-    // Display in data section - show full ParseContext
-    let html = `<h3>ParseContext for ${txid.slice(0, 8)}...${txid.slice(-8)}</h3>`;
-    html += `<p><strong>Outputs:</strong> ${ctx.txos.length} | <strong>Spends:</strong> ${ctx.spends.length}</p>`;
-
-    html += "<h4>Outputs (txos)</h4>";
-    html += '<div class="outputs-list">';
-    for (const txo of ctx.txos) {
-      const tags: string[] = [];
-      for (const indexData of Object.values(txo.data)) {
-        if (indexData.tags) {
-          tags.push(...indexData.tags);
-        }
-      }
-      html += `
-        <div class="data-item">
-          <div><span class="label">Outpoint:</span><span class="value">${txo.outpoint.toString()}</span></div>
-          <div><span class="label">Satoshis:</span><span class="value">${txo.output.satoshis?.toString() || "0"}</span></div>
-          ${txo.owner ? `<div><span class="label">Owner:</span><span class="value">${txo.owner}</span></div>` : ""}
-          ${txo.basket ? `<div><span class="label">Basket:</span><span class="basket-badge">${escapeHtml(txo.basket)}</span></div>` : ""}
-          ${tags.length > 0 ? `<div><span class="label">Tags:</span>${tags.map((t) => `<span class="tag-badge">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
-          <div><span class="label">Indexers:</span><span class="value">${Object.keys(txo.data).join(", ") || "none"}</span></div>
-          <div class="json-viewer"><pre>${escapeHtml(JSON.stringify(txo.data, null, 2))}</pre></div>
+        <div class="form-group">
+          <label for="addresses">Addresses (one per line)</label>
+          <textarea 
+            id="addresses" 
+            placeholder="1ABC...&#10;1XYZ..."
+          >${state.addresses.join("\n")}</textarea>
+          <div class="hint">Enter BSV addresses to sync, one per line</div>
         </div>
-      `;
-    }
-    html += "</div>";
 
-    if (ctx.spends.length > 0) {
-      html += "<h4>Spends</h4>";
-      html += '<div class="outputs-list">';
-      for (const spend of ctx.spends) {
-        html += `
-          <div class="data-item">
-            <div><span class="label">Outpoint:</span><span class="value">${spend.outpoint.toString()}</span></div>
-            <div><span class="label">Satoshis:</span><span class="value">${spend.output.satoshis?.toString() || "0"}</span></div>
-            ${spend.owner ? `<div><span class="label">Owner:</span><span class="value">${spend.owner}</span></div>` : ""}
-            <div><span class="label">Indexers:</span><span class="value">${Object.keys(spend.data).join(", ") || "none"}</span></div>
-            <div class="json-viewer"><pre>${escapeHtml(JSON.stringify(spend.data, null, 2))}</pre></div>
-          </div>
-        `;
-      }
-      html += "</div>";
-    }
-
-    if (Object.keys(ctx.summary).length > 0) {
-      html += `<h4>Summary</h4><div class="json-viewer"><pre>${escapeHtml(JSON.stringify(ctx.summary, null, 2))}</pre></div>`;
-    }
-
-    dataDisplay.innerHTML = html;
-    setStatus("Parse complete!", "success");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`Parse failed: ${message}`, "error");
-    setStatus(`Parse failed: ${message}`, "error");
-    console.error("Parse error:", error);
-  }
-}
-
-// Stop sync
-function stopSync() {
-  const address = addressInput.value.trim();
-  if (!address || !wallet) {
-    return;
-  }
-
-  log(`Stopping sync for ${address}...`, "info");
-  wallet.stopSync(address);
-  setStatus("Sync stopped", "error");
-  isSyncing = false;
-  syncBtn.disabled = false;
-  stopBtn.disabled = true;
-  updateSyncProgressInfo();
-}
-
-// Event listeners
-syncBtn.addEventListener("click", syncAddress);
-stopBtn.addEventListener("click", stopSync);
-resyncBtn.addEventListener("click", fullResync);
-resetProgressBtn.addEventListener("click", resetSyncProgress);
-clearStorageBtn.addEventListener("click", clearStorage);
-parseTxBtn.addEventListener("click", parseTx);
-listOutputsBtn.addEventListener("click", listOutputs);
-listActionsBtn.addEventListener("click", listActions);
-showBasketsBtn.addEventListener("click", showBaskets);
-
-// Update progress info when address changes
-addressInput.addEventListener("input", updateSyncProgressInfo);
-
-// Allow Enter key to trigger sync
-addressInput.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    syncAddress();
-  }
-});
-
-// Allow Enter key to trigger parse
-txidInput.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    parseTx();
-  }
-});
-
-// Modal functions
-function showModal(title: string, content: string) {
-  // Remove any existing modal
-  closeModal();
-
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "parse-modal";
-  overlay.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>${escapeHtml(title)}</h3>
-        <button class="modal-close" onclick="document.getElementById('parse-modal')?.remove()">Close</button>
-      </div>
-      <div class="modal-body">
-        <pre>${escapeHtml(content)}</pre>
+        <button class="btn btn-primary" id="login-btn">Continue</button>
       </div>
     </div>
   `;
 
-  // Close on overlay click (not content)
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) {
-      closeModal();
-    }
+  const apiUrlInput = document.getElementById("api-url");
+  const chainSelect = document.getElementById("chain");
+  const identityKeyInput = document.getElementById("identity-key");
+  const addressesTextarea = document.getElementById("addresses");
+  const loginBtn = document.getElementById("login-btn");
+
+  apiUrlInput?.addEventListener("input", (e) => {
+    state.apiUrl = (e.target as HTMLInputElement).value;
   });
 
-  // Close on Escape key
-  const escHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      closeModal();
-      document.removeEventListener("keydown", escHandler);
+  chainSelect?.addEventListener("change", (e) => {
+    state.chain = (e.target as HTMLSelectElement).value as "main" | "test";
+  });
+
+  identityKeyInput?.addEventListener("input", (e) => {
+    state.identityKey = (e.target as HTMLInputElement).value.trim();
+  });
+
+  addressesTextarea?.addEventListener("input", (e) => {
+    const text = (e.target as HTMLTextAreaElement).value;
+    state.addresses = text
+      .split("\n")
+      .map((a) => a.trim())
+      .filter((a) => a.length > 0);
+  });
+
+  loginBtn?.addEventListener("click", () => {
+    if (!state.identityKey) {
+      alert("Please enter an identity key");
+      return;
     }
-  };
-  document.addEventListener("keydown", escHandler);
-
-  document.body.appendChild(overlay);
+    if (state.addresses.length === 0) {
+      alert("Please enter at least one address");
+      return;
+    }
+    state.page = "dashboard";
+    render();
+  });
 }
 
-function closeModal() {
-  document.getElementById("parse-modal")?.remove();
+async function initWallet(): Promise<void> {
+  // Initialize sync queue
+  syncQueue = new IndexedDbSyncQueue(state.identityKey);
+
+  // Create IDB storage
+  const storageProvider = new StorageIdb({
+    chain: state.chain,
+    feeModel: { model: "sat/kb", value: 1 },
+    commissionSatoshis: 0,
+  });
+
+  // Migrate storage
+  await storageProvider.migrate("1sat-tester", state.identityKey);
+
+  // Initialize storage manager
+  storage = new WalletStorageManager(state.identityKey, storageProvider);
+
+  // Create wallet with sync queue
+  wallet = new OneSatWallet({
+    rootKey: state.identityKey, // Read-only mode with public key
+    storage,
+    chain: state.chain,
+    owners: new Set(state.addresses),
+    onesatUrl: state.apiUrl,
+    syncQueue,
+  });
+
+  // Set up event listeners
+  wallet.on("sync:start", (event) => {
+    log(`Sync started for ${event.addresses.length} addresses`);
+    state.isSyncing = true;
+    updateSyncButtons();
+  });
+
+  wallet.on("sync:progress", (event) => {
+    log(`Progress: ${event.done} done, ${event.pending} pending, ${event.failed} failed`);
+  });
+
+  wallet.on("sync:complete", () => {
+    log("Sync complete");
+    state.isSyncing = false;
+    updateSyncButtons();
+  });
+
+  wallet.on("sync:error", (event) => {
+    log(`Sync error: ${event.message}`, "error");
+    state.isSyncing = false;
+    updateSyncButtons();
+  });
 }
 
-async function parseAndShowModal(txid: string) {
-  if (!wallet) {
-    log("No wallet initialized", "error");
+async function renderDashboard() {
+  // Get initial stats (queue may not exist yet)
+  let stats: SyncQueueStats = { pending: 0, processing: 0, done: 0, failed: 0 };
+  let syncState: SyncState = { lastQueuedScore: 0 };
+
+  // Try to get existing queue stats
+  const tempQueue = new IndexedDbSyncQueue(state.identityKey);
+  try {
+    stats = await tempQueue.getStats();
+    syncState = await tempQueue.getState();
+  } catch {
+    // Queue doesn't exist yet, use defaults
+  }
+  await tempQueue.close();
+
+  app.innerHTML = `
+    <div class="dashboard-page">
+      <div class="dashboard-header">
+        <h1>1Sat Wallet Tester</h1>
+        <button class="btn btn-secondary" id="logout-btn">Logout</button>
+      </div>
+      
+      <div class="dashboard-content">
+        <div class="card">
+          <h2>Configuration</h2>
+          <div class="info-grid">
+            <div class="info-row">
+              <span class="label">API URL</span>
+              <span class="value">${state.apiUrl}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Network</span>
+              <span class="value">${state.chain === "main" ? "Mainnet" : "Testnet"}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Identity Key</span>
+              <span class="value">${truncate(state.identityKey, 20)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Addresses (${state.addresses.length})</h2>
+          <div class="address-list">
+            ${state.addresses.map((addr) => `<div class="address-item">${addr}</div>`).join("")}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Sync</h2>
+            <div class="button-group">
+              <button class="btn btn-primary" id="sync-btn">Start Sync</button>
+              <button class="btn btn-danger" id="stop-btn" style="display: none;">Stop</button>
+              <button class="btn btn-secondary" id="clear-btn">Clear Queue</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control-group">
+              <span class="control-label">SSE Stream</span>
+              <button class="btn btn-sm" id="stream-btn">Start</button>
+            </div>
+            <div class="control-group">
+              <span class="control-label">Queue Processor</span>
+              <button class="btn btn-sm" id="processor-btn">Start</button>
+            </div>
+          </div>
+          <div class="stats-grid" id="stats-grid">
+            ${renderStatsGrid(stats)}
+          </div>
+          <div class="sync-state" id="sync-state">
+            ${renderSyncState(syncState)}
+          </div>
+          <div class="log-container">
+            <div class="log-box" id="log-box"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Queue Items</h2>
+            <div class="button-group">
+              <button class="btn btn-sm" id="view-pending-btn">Pending</button>
+              <button class="btn btn-sm" id="view-processing-btn">Processing</button>
+              <button class="btn btn-sm" id="view-done-btn">Done</button>
+              <button class="btn btn-sm" id="view-failed-btn">Failed</button>
+            </div>
+          </div>
+          <div class="queue-items" id="queue-items">
+            <div class="placeholder">Select a status to view queue items</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("logout-btn")?.addEventListener("click", handleLogout);
+  document.getElementById("sync-btn")?.addEventListener("click", handleSync);
+  document.getElementById("stop-btn")?.addEventListener("click", handleStopSync);
+  document.getElementById("clear-btn")?.addEventListener("click", handleClearQueue);
+  document.getElementById("stream-btn")?.addEventListener("click", handleToggleStream);
+  document.getElementById("processor-btn")?.addEventListener("click", handleToggleProcessor);
+  document.getElementById("view-pending-btn")?.addEventListener("click", () => viewQueueItems("pending"));
+  document.getElementById("view-processing-btn")?.addEventListener("click", () => viewQueueItems("processing"));
+  document.getElementById("view-done-btn")?.addEventListener("click", () => viewQueueItems("done"));
+  document.getElementById("view-failed-btn")?.addEventListener("click", () => viewQueueItems("failed"));
+
+  // Start stats polling
+  statsInterval = setInterval(updateStats, 500);
+}
+
+function renderStatsGrid(stats: SyncQueueStats): string {
+  return `
+    <div class="stat-item">
+      <span class="stat-value">${stats.pending}</span>
+      <span class="stat-label">Pending</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">${stats.processing}</span>
+      <span class="stat-label">Processing</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value stat-success">${stats.done}</span>
+      <span class="stat-label">Done</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value stat-error">${stats.failed}</span>
+      <span class="stat-label">Failed</span>
+    </div>
+  `;
+}
+
+function renderSyncState(syncState: SyncState): string {
+  const lastSynced = syncState.lastSyncedAt
+    ? new Date(syncState.lastSyncedAt).toLocaleString()
+    : "Never";
+
+  return `
+    <div class="info-row">
+      <span class="label">Last Queued Score</span>
+      <span class="value">${syncState.lastQueuedScore.toFixed(6)}</span>
+    </div>
+    <div class="info-row">
+      <span class="label">Last Synced</span>
+      <span class="value">${lastSynced}</span>
+    </div>
+  `;
+}
+
+async function updateStats() {
+  if (!syncQueue && !wallet) {
+    // Use temp queue to read stats
+    const tempQueue = new IndexedDbSyncQueue(state.identityKey);
+    try {
+      const stats = await tempQueue.getStats();
+      const syncState = await tempQueue.getState();
+      updateStatsDisplay(stats, syncState);
+    } catch {
+      // Ignore
+    }
+    await tempQueue.close();
     return;
   }
 
-  try {
-    log(`Parsing transaction ${txid}...`, "info");
-    const ctx = await wallet.parseTransaction(txid);
-    // Custom replacer to handle BigInt and exclude tx/indexers
-    const jsonStr = JSON.stringify(
-      ctx,
-      (key, value) => {
-        if (key === "tx" || key === "indexers" || key === "script")
-          return undefined;
-        if (typeof value === "bigint") return value.toString();
-        return value;
-      },
-      2,
-    );
-    showModal(`ParseContext: ${txid}`, jsonStr);
-    log(`Parse complete for ${txid}`, "success");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`Parse failed: ${message}`, "error");
-    showModal(`Parse Error: ${txid}`, `Error: ${message}`);
+  if (syncQueue) {
+    try {
+      const stats = await syncQueue.getStats();
+      const syncState = await syncQueue.getState();
+      updateStatsDisplay(stats, syncState);
+    } catch {
+      // Queue might be closed
+    }
   }
 }
 
-// Make parseAndShowModal available globally for onclick handlers
-(
-  window as unknown as { parseAndShowModal: typeof parseAndShowModal }
-).parseAndShowModal = parseAndShowModal;
+function updateStatsDisplay(stats: SyncQueueStats, syncState: SyncState) {
+  const statsGrid = document.getElementById("stats-grid");
+  const syncStateEl = document.getElementById("sync-state");
 
-// Initial log
-log("1Sat Wallet Sync Tester initialized", "info");
-log("Enter an address and click Sync to begin", "info");
+  if (statsGrid) {
+    statsGrid.innerHTML = renderStatsGrid(stats);
+  }
+  if (syncStateEl) {
+    syncStateEl.innerHTML = renderSyncState(syncState);
+  }
+}
 
-// Initial progress info update
-updateSyncProgressInfo();
+function updateSyncButtons() {
+  const syncBtn = document.getElementById("sync-btn") as HTMLButtonElement | null;
+  const stopBtn = document.getElementById("stop-btn") as HTMLButtonElement | null;
+
+  if (syncBtn) {
+    syncBtn.style.display = state.isSyncing ? "none" : "block";
+  }
+  if (stopBtn) {
+    stopBtn.style.display = state.isSyncing ? "block" : "none";
+  }
+}
+
+async function handleSync() {
+  if (state.isSyncing) return;
+
+  log("Initializing wallet...");
+
+  try {
+    await initWallet();
+    log("Starting sync...");
+    wallet?.sync();
+  } catch (error) {
+    log(`Failed to start sync: ${error}`, "error");
+    state.isSyncing = false;
+    updateSyncButtons();
+  }
+}
+
+function handleStopSync() {
+  if (!wallet || !state.isSyncing) return;
+
+  log("Stopping sync...");
+  wallet.stopSync();
+  state.isSyncing = false;
+  state.isStreamActive = false;
+  state.isProcessorActive = false;
+  updateSyncButtons();
+  updateControlButtons();
+  log("Sync stopped");
+}
+
+async function handleToggleStream() {
+  if (!wallet) {
+    // Need to init wallet first
+    log("Initializing wallet...");
+    await initWallet();
+  }
+
+  if (state.isStreamActive) {
+    log("Stopping SSE stream...");
+    wallet?.stopStream();
+    state.isStreamActive = false;
+    log("SSE stream stopped");
+  } else {
+    log("Starting SSE stream...");
+    wallet?.startStream();
+    state.isStreamActive = true;
+    log("SSE stream started");
+  }
+  updateControlButtons();
+}
+
+async function handleToggleProcessor() {
+  if (!wallet) {
+    // Need to init wallet first
+    log("Initializing wallet...");
+    await initWallet();
+  }
+
+  if (state.isProcessorActive) {
+    log("Stopping queue processor...");
+    wallet?.stopProcessor();
+    state.isProcessorActive = false;
+    log("Queue processor stopped");
+  } else {
+    log("Starting queue processor...");
+    state.isProcessorActive = true;
+    updateControlButtons();
+    wallet?.startProcessor().then(() => {
+      state.isProcessorActive = false;
+      updateControlButtons();
+    });
+    log("Queue processor started");
+  }
+  updateControlButtons();
+}
+
+function updateControlButtons() {
+  const streamBtn = document.getElementById("stream-btn");
+  const processorBtn = document.getElementById("processor-btn");
+
+  if (streamBtn) {
+    streamBtn.textContent = state.isStreamActive ? "Stop" : "Start";
+    streamBtn.className = state.isStreamActive ? "btn btn-sm btn-danger" : "btn btn-sm";
+  }
+  if (processorBtn) {
+    processorBtn.textContent = state.isProcessorActive ? "Stop" : "Start";
+    processorBtn.className = state.isProcessorActive ? "btn btn-sm btn-danger" : "btn btn-sm";
+  }
+}
+
+async function handleClearQueue() {
+  if (state.isSyncing) {
+    alert("Cannot clear queue while syncing");
+    return;
+  }
+
+  if (!confirm("Clear all queue data?")) return;
+
+  const tempQueue = new IndexedDbSyncQueue(state.identityKey);
+  try {
+    await tempQueue.clear();
+    log("Queue cleared");
+  } catch (error) {
+    log(`Failed to clear queue: ${error}`, "error");
+  }
+  await tempQueue.close();
+}
+
+function handleLogout() {
+  // Stop sync if running
+  if (wallet) {
+    wallet.stopSync();
+    wallet.close();
+    wallet = null;
+  }
+  if (syncQueue) {
+    syncQueue.close();
+    syncQueue = null;
+  }
+  storage = null;
+  state.isSyncing = false;
+  state.page = "login";
+  render();
+}
+
+function log(message: string, type: "info" | "error" = "info") {
+  const logBox = document.getElementById("log-box");
+  if (!logBox) return;
+
+  const time = new Date().toLocaleTimeString();
+  const entry = document.createElement("div");
+  entry.className = `log-entry ${type}`;
+  entry.textContent = `[${time}] ${message}`;
+  logBox.appendChild(entry);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function truncate(str: string, len: number): string {
+  if (str.length <= len) return str;
+  return `${str.slice(0, len)}...`;
+}
+
+async function viewQueueItems(status: SyncQueueItemStatus) {
+  const container = document.getElementById("queue-items");
+  if (!container) return;
+
+  container.innerHTML = '<div class="placeholder">Loading...</div>';
+
+  const tempQueue = new IndexedDbSyncQueue(state.identityKey);
+  try {
+    const items = await tempQueue.getByStatus(status, 200);
+
+    if (items.length === 0) {
+      container.innerHTML = `<div class="placeholder">No ${status} items</div>`;
+      return;
+    }
+
+    // Sort by score descending to see most recent first
+    items.sort((a, b) => b.score - a.score);
+
+    // Group by block height (integer part of score)
+    const byBlock = new Map<number, typeof items>();
+    for (const item of items) {
+      const block = Math.floor(item.score);
+      const existing = byBlock.get(block);
+      if (existing) {
+        existing.push(item);
+      } else {
+        byBlock.set(block, [item]);
+      }
+    }
+
+    let html = `<div class="queue-summary">Showing ${items.length} ${status} items across ${byBlock.size} blocks</div>`;
+    html += '<div class="queue-list">';
+
+    for (const [block, blockItems] of byBlock) {
+      html += `<div class="queue-block">
+        <div class="queue-block-header">Block ${block} (${blockItems.length} items)</div>
+        <div class="queue-block-items">`;
+
+      for (const item of blockItems) {
+        const txid = item.outpoint.substring(0, 64);
+        const vout = item.outpoint.substring(65);
+        const isSpend = item.spendTxid ? "spend" : "create";
+
+        html += `<div class="queue-item ${isSpend}">
+          <div class="queue-item-main">
+            <span class="queue-item-txid">${txid.substring(0, 8)}...${txid.substring(56)}</span>
+            <span class="queue-item-vout">:${vout}</span>
+            <span class="queue-item-type">${isSpend}</span>
+          </div>
+          <div class="queue-item-details">
+            <span>Score: ${item.score.toFixed(6)}</span>
+            ${item.spendTxid ? `<span>Spent by: ${item.spendTxid.substring(0, 12)}...</span>` : ""}
+            ${item.lastError ? `<span class="error">Error: ${item.lastError}</span>` : ""}
+          </div>
+        </div>`;
+      }
+
+      html += "</div></div>";
+    }
+
+    html += "</div>";
+    container.innerHTML = html;
+  } catch (error) {
+    container.innerHTML = `<div class="placeholder error">Error: ${error}</div>`;
+  } finally {
+    await tempQueue.close();
+  }
+}
+
+// Initial render
+render();

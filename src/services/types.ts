@@ -233,6 +233,41 @@ export interface OrdfsMetadata {
   map?: Record<string, unknown>;
 }
 
+/**
+ * Options for OrdFS content requests
+ */
+export interface OrdfsContentOptions {
+  /** Sequence number (-1 for latest, 0+ for specific sequence) */
+  seq?: number;
+  /** Include MAP data in X-Map header */
+  map?: boolean;
+  /** Include parent outpoint in X-Parent header */
+  parent?: boolean;
+  /** Return raw directory JSON instead of resolving */
+  raw?: boolean;
+}
+
+/**
+ * Headers returned from OrdFS content responses
+ */
+export interface OrdfsResponseHeaders {
+  contentType: string;
+  outpoint?: string;
+  origin?: string;
+  sequence?: number;
+  cacheControl?: string;
+  map?: Record<string, unknown>;
+  parent?: string;
+}
+
+/**
+ * Full content response from OrdFS including headers
+ */
+export interface OrdfsContentResponse {
+  data: Uint8Array;
+  headers: OrdfsResponseHeaders;
+}
+
 // ============================================================================
 // BSV21 Types (Tokens)
 // ============================================================================

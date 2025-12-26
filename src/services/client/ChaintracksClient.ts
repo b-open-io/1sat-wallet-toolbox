@@ -97,9 +97,6 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
     try {
       const header = await this.getHeaderByHeight(height);
       const isValid = header.merkleRoot === root;
-      console.log(
-        `isValidRootForHeight(${height}): expected=${root}, got=${header.merkleRoot}, valid=${isValid}`,
-      );
       return isValid;
     } catch (e) {
       console.error(`isValidRootForHeight(${height}) failed:`, e);

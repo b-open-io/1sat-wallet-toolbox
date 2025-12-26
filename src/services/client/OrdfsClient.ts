@@ -1,4 +1,10 @@
-import type { ClientOptions, OrdfsMetadata } from "../types";
+import type {
+  ClientOptions,
+  OrdfsContentOptions,
+  OrdfsContentResponse,
+  OrdfsMetadata,
+  OrdfsResponseHeaders,
+} from "../types";
 import { BaseClient } from "./BaseClient";
 
 /**
@@ -9,55 +15,136 @@ import { BaseClient } from "./BaseClient";
  * API routes use /api/ordfs (e.g., https://api.1sat.app/api/ordfs/metadata/:outpoint)
  */
 export class OrdfsClient extends BaseClient {
+  private readonly contentBaseUrl: string;
+
   constructor(baseUrl: string, options: ClientOptions = {}) {
     super(`${baseUrl}/api/ordfs`, options);
+    this.contentBaseUrl = baseUrl.replace(/\/$/, "");
   }
 
   /**
    * Get metadata for an inscription
+   * @param outpoint - Outpoint (txid_vout) or txid
+   * @param seq - Optional sequence number (-1 for latest)
    */
-  async getMetadata(outpoint: string): Promise<OrdfsMetadata> {
-    return this.request<OrdfsMetadata>(`/metadata/${outpoint}`);
+  async getMetadata(outpoint: string, seq?: number): Promise<OrdfsMetadata> {
+    const path = seq !== undefined ? `${outpoint}:${seq}` : outpoint;
+    return this.request<OrdfsMetadata>(`/metadata/${path}`);
   }
 
   /**
-   * Get inscription content as binary (fetches from content URL)
+   * Get inscription content with full response headers
+   * @param outpoint - Outpoint (txid_vout) or txid
+   * @param options - Content request options
    */
-  async getContent(outpoint: string): Promise<Uint8Array> {
-    const response = await fetch(this.getContentUrl(outpoint));
-    if (!response.ok) {
-      throw new Error(`Failed to fetch content: ${response.statusText}`);
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
-  }
-
-  /**
-   * Get inscription content with content-type header
-   */
-  async getContentWithType(
+  async getContent(
     outpoint: string,
-  ): Promise<{ data: Uint8Array; contentType: string }> {
-    const response = await fetch(this.getContentUrl(outpoint));
-    if (!response.ok) {
-      throw new Error(`Failed to fetch content: ${response.statusText}`);
+    options: OrdfsContentOptions = {},
+  ): Promise<OrdfsContentResponse> {
+    const url = this.getContentUrl(outpoint, options);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await this.fetchFn(url, {
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch content: ${response.statusText}`);
+      }
+
+      const headers = this.parseResponseHeaders(response);
+      const arrayBuffer = await response.arrayBuffer();
+
+      return {
+        data: new Uint8Array(arrayBuffer),
+        headers,
+      };
+    } finally {
+      clearTimeout(timeoutId);
     }
-    const contentType =
-      response.headers.get("content-type") || "application/octet-stream";
-    const arrayBuffer = await response.arrayBuffer();
-    return {
-      data: new Uint8Array(arrayBuffer),
-      contentType,
-    };
   }
 
   /**
-   * Get the URL for fetching inscription content directly
-   * Useful for displaying in img/video tags
+   * Preview base64-encoded HTML content
+   * @param b64HtmlData - Base64-encoded HTML
    */
-  getContentUrl(outpoint: string): string {
-    // Content served from base URL without /api
-    const contentBaseUrl = this.baseUrl.replace("/api/ordfs", "");
-    return `${contentBaseUrl}/${outpoint}`;
+  async previewHtml(b64HtmlData: string): Promise<string> {
+    const response = await this.requestRaw(`/preview/${b64HtmlData}`);
+    return response.text();
+  }
+
+  /**
+   * Preview content by posting it directly
+   * @param content - Content to preview
+   * @param contentType - Content type header
+   */
+  async previewContent(
+    content: Uint8Array,
+    contentType: string,
+  ): Promise<Uint8Array> {
+    return this.requestBinary("/preview", {
+      method: "POST",
+      headers: { "Content-Type": contentType },
+      body: content as unknown as BodyInit,
+    });
+  }
+
+  /**
+   * Get the URL for fetching inscription content directly.
+   * Useful for displaying in img/video tags.
+   * @param outpoint - Outpoint (txid_vout) or txid
+   * @param options - Content request options
+   */
+  getContentUrl(outpoint: string, options: OrdfsContentOptions = {}): string {
+    let path = outpoint;
+    if (options.seq !== undefined) {
+      path = `${outpoint}:${options.seq}`;
+    }
+
+    const queryParams = this.buildQueryString({
+      map: options.map,
+      parent: options.parent,
+      raw: options.raw,
+    });
+
+    return `${this.contentBaseUrl}/${path}${queryParams}`;
+  }
+
+  /**
+   * Parse response headers into structured object
+   */
+  private parseResponseHeaders(response: Response): OrdfsResponseHeaders {
+    const headers: OrdfsResponseHeaders = {
+      contentType:
+        response.headers.get("content-type") || "application/octet-stream",
+    };
+
+    const outpoint = response.headers.get("x-outpoint");
+    if (outpoint) headers.outpoint = outpoint;
+
+    const origin = response.headers.get("x-origin");
+    if (origin) headers.origin = origin;
+
+    const seq = response.headers.get("x-ord-seq");
+    if (seq) headers.sequence = Number.parseInt(seq, 10);
+
+    const cacheControl = response.headers.get("cache-control");
+    if (cacheControl) headers.cacheControl = cacheControl;
+
+    const mapData = response.headers.get("x-map");
+    if (mapData) {
+      try {
+        headers.map = JSON.parse(mapData);
+      } catch {
+        // Invalid JSON, skip
+      }
+    }
+
+    const parent = response.headers.get("x-parent");
+    if (parent) headers.parent = parent;
+
+    return headers;
   }
 }

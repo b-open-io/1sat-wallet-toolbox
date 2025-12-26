@@ -35,7 +35,7 @@ export class OrdLockIndexer extends Indexer {
 
     return {
       data: listing,
-      tags: ["ordlock"],
+      tags: [`list:${listing.price}`],
       owner: decoded.seller,
     };
   }

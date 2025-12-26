@@ -46,6 +46,8 @@ export interface Bsv21TransactionData {
 export interface IndexData {
   data: unknown;
   tags: string[];
+  /** Optional text content (e.g., from text inscriptions). */
+  content?: string;
 }
 
 /**
@@ -66,6 +68,8 @@ export interface ParseResult {
   tags: string[];
   owner?: string;
   basket?: string;
+  /** Optional text content (e.g., from text inscriptions). Truncated to 1000 chars when stored. */
+  content?: string;
 }
 
 /**

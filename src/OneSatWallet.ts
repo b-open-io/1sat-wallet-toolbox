@@ -26,6 +26,13 @@ import { SigmaIndexer } from "./indexers/SigmaIndexer";
 import type { Indexer, ParseContext, Txo } from "./indexers/types";
 import { OneSatServices, type SyncOutput } from "./services/OneSatServices";
 import { ReadOnlySigner } from "./signers/ReadOnlySigner";
+import type { SyncQueueItem, SyncQueueStorage } from "./sync/types";
+
+/** Number of blocks to wait before considering a score "safe" from reorgs */
+const REORG_SAFE_DEPTH = 6;
+
+/** Default batch size for queue processing */
+const DEFAULT_BATCH_SIZE = 20;
 
 /**
  * Result of ingestTransaction including parse context for debugging
@@ -39,28 +46,14 @@ export interface IngestResult {
  * Events emitted by OneSatWallet during sync operations
  */
 export interface OneSatWalletEvents {
-  "sync:start": { address: string; fromScore: number };
-  "sync:output": { address: string; output: SyncOutput };
-  "sync:skipped": { address: string; outpoint: string; reason: string };
-  "sync:parsed": {
-    address: string;
-    txid: string;
-    parseContext: ParseContext;
-    internalizedCount: number;
-  };
-  "sync:error": { address: string; error: Error };
-  "sync:complete": { address: string };
-  // Multi-owner sync events
-  "syncAll:start": { addresses: string[]; fromScore: number };
-  "syncAll:output": { output: SyncOutput };
-  "syncAll:skipped": { outpoint: string; reason: string };
-  "syncAll:parsed": {
-    txid: string;
-    parseContext: ParseContext;
-    internalizedCount: number;
-  };
-  "syncAll:error": { error: Error };
-  "syncAll:complete": { addresses: string[] };
+  /** Sync started */
+  "sync:start": { addresses: string[] };
+  /** Sync progress update */
+  "sync:progress": { pending: number; done: number; failed: number };
+  /** Sync complete (queue empty and stream done) */
+  "sync:complete": Record<string, never>;
+  /** Sync error */
+  "sync:error": { message: string };
 }
 
 type EventCallback<T> = (event: T) => void;
@@ -101,6 +94,17 @@ export interface OneSatWalletArgs {
    * Automatically start syncing all owner addresses on construction.
    */
   autoSync?: boolean;
+
+  /**
+   * Sync queue storage for background processing.
+   * If provided, enables queue-based sync via sync() method.
+   */
+  syncQueue?: SyncQueueStorage;
+
+  /**
+   * Batch size for queue processing (default: 20).
+   */
+  syncBatchSize?: number;
 }
 
 /**
@@ -118,8 +122,20 @@ export class OneSatWallet extends Wallet {
   private listeners: {
     [K in keyof OneSatWalletEvents]?: Set<EventCallback<OneSatWalletEvents[K]>>;
   } = {};
-  private activeSyncs = new Map<string, () => void>();
-  private activeMultiSync: (() => void) | null = null;
+
+  // Queue-based sync
+  private syncQueue: SyncQueueStorage | null = null;
+  private syncBatchSize: number = DEFAULT_BATCH_SIZE;
+  private syncRunning = false;
+  private syncStopRequested = false;
+  private activeQueueSync: (() => void) | null = null;
+
+  // Separate stream/processor state for testing
+  private sseStreamActive = false;
+  private sseUnsubscribe: (() => void) | null = null;
+  private processorActive = false;
+  private processorStopRequested = false;
+  private streamDone = false;
 
   constructor(args: OneSatWalletArgs) {
     const isReadOnly = typeof args.rootKey === "string";
@@ -161,8 +177,12 @@ export class OneSatWallet extends Wallet {
       new CosignIndexer(owners, network),
     ];
 
+    // Queue-based sync settings
+    this.syncQueue = args.syncQueue ?? null;
+    this.syncBatchSize = args.syncBatchSize ?? DEFAULT_BATCH_SIZE;
+
     if (args.autoSync) {
-      this.syncAll();
+      this.sync();
     }
   }
 
@@ -326,6 +346,7 @@ export class OneSatWallet extends Wallet {
         txo.data[indexer.tag] = {
           data: result.data,
           tags: result.tags,
+          content: result.content,
         };
         if (result.owner) {
           txo.owner = result.owner;
@@ -632,14 +653,19 @@ export class OneSatWallet extends Wallet {
               continue;
             }
 
-            // Collect tags from all indexer data
+            // Collect tags and content from all indexer data
             const tags: string[] = [];
+            let content: string | undefined;
             if (txo.owner) {
               tags.push(`own:${txo.owner}`);
             }
             for (const indexData of Object.values(txo.data)) {
               if (indexData.tags) {
                 tags.push(...indexData.tags);
+              }
+              // Use first non-empty content found
+              if (!content && indexData.content) {
+                content = indexData.content;
               }
             }
 
@@ -671,6 +697,7 @@ export class OneSatWallet extends Wallet {
               txid,
               lockingScript: Array.from(txo.output.lockingScript.toBinary()),
               spentBy: undefined,
+              customInstructions: content?.substring(0, 1000),
             };
 
             const outputId = await sp.insertOutput(newOutput, trx);
@@ -731,449 +758,427 @@ export class OneSatWallet extends Wallet {
     return this.ingestTransaction(tx, description, labels, true);
   }
 
+  // ===== Queue-Based Sync =====
+
   /**
-   * Sync a single address from the 1Sat indexer using Server-Sent Events.
-   * Runs in the background - use stopSync() or close() to stop.
+   * Start queue-based sync for all owner addresses.
+   * Requires syncQueue to be provided in constructor args.
    *
-   * @param address - The address to sync
+   * This method:
+   * 1. Opens SSE stream and enqueues outputs
+   * 2. Processes queue in batches using Promise.all()
+   * 3. Continues until queue is empty and stream is done
    */
-  syncAddress(address: string, fromScore = 0): void {
-    // Stop any existing sync for this address
-    this.stopSync(address);
+  async sync(): Promise<void> {
+    if (!this.syncQueue) {
+      throw new Error(
+        "syncQueue not provided - provide syncQueue in constructor",
+      );
+    }
 
-    // Emit sync start event
-    this.emit("sync:start", { address, fromScore });
-
-    // Track txids seen during this sync session to avoid redundant DB lookups
-    const seenTxids = new Set<string>();
-
-    const processOutput = async (output: SyncOutput) => {
-      // Emit sync:output for each output received
-      this.emit("sync:output", { address, output });
-      const txid = output.outpoint.substring(0, 64);
-
-      // Check if we've already processed this txid in this session
-      if (seenTxids.has(txid)) {
-        this.emit("sync:skipped", {
-          address,
-          outpoint: output.outpoint,
-          reason: "already processed in this session",
-        });
-        // Still need to check spend txid
-        if (output.spendTxid && !seenTxids.has(output.spendTxid)) {
-          await this.processSpendTx(address, output, seenTxids);
-        }
-        return;
-      }
-
-      const vout = Number.parseInt(output.outpoint.substring(65), 10);
-      const hasOutput = await this.storage.runAsStorageProvider(async (sp) => {
-        const outputs = await sp.findOutputs({ partial: { txid, vout } });
-        return outputs.length > 0;
-      });
-
-      if (!hasOutput) {
-        if (output.spendTxid) {
-          // Already spent and we don't have the output - skip
-          seenTxids.add(txid);
-          this.emit("sync:skipped", {
-            address,
-            outpoint: output.outpoint,
-            reason: "already spent, skipping historical output",
-          });
-          return;
-        }
-        // Unspent - fetch and ingest
-        const tx = await this.loadTransaction(txid);
-        const result = await this.ingestTransaction(tx, "1sat-sync");
-        seenTxids.add(txid);
-        this.emit("sync:parsed", {
-          address,
-          txid,
-          parseContext: result.parseContext,
-          internalizedCount: result.internalizedCount,
-        });
-      } else {
-        seenTxids.add(txid);
-        if (output.spendTxid) {
-          await this.processSpendTx(address, output, seenTxids);
-        } else {
-          this.emit("sync:skipped", {
-            address,
-            outpoint: output.outpoint,
-            reason: "already have output in storage",
-          });
-        }
-      }
-    };
-
-    // Use owner.sync from services
-    const unsubscribe = this.services.owner.sync(
-      address,
-      (output) => {
-        processOutput(output);
-      },
-      fromScore,
-      () => {
-        // onDone
-        this.activeSyncs.delete(address);
-        this.emit("sync:complete", { address });
-      },
-      (error) => {
-        // onError
-        this.activeSyncs.delete(address);
-        this.emit("sync:error", { address, error });
-      },
-    );
-
-    this.activeSyncs.set(address, unsubscribe);
-  }
-
-  /**
-   * Process a spend transaction during sync.
-   * Only marks our output as spent - doesn't ingest the spend tx.
-   * If the spend tx has outputs we own, they'll come through sync separately.
-   */
-  private async processSpendTx(
-    address: string,
-    output: SyncOutput,
-    seenTxids: Set<string>,
-  ): Promise<void> {
-    if (!output.spendTxid || seenTxids.has(output.spendTxid)) {
+    if (this.syncRunning) {
       return;
     }
-
-    // Parse the outpoint to get txid and vout
-    const spentTxid = output.outpoint.substring(0, 64);
-    const spentVout = Number.parseInt(output.outpoint.substring(65), 10);
-
-    // Check if we have this output and it's not already marked spent
-    const userId = await this.storage.getUserId();
-    const outputRecord = await this.storage.runAsStorageProvider(async (sp) => {
-      const outputs = await sp.findOutputs({
-        partial: { userId, txid: spentTxid, vout: spentVout },
-      });
-      return outputs.length > 0 ? outputs[0] : null;
-    });
-
-    // Skip if we don't have this output or it's already spent
-    if (!outputRecord || !outputRecord.spendable) {
-      seenTxids.add(output.spendTxid);
-      this.emit("sync:skipped", {
-        address,
-        outpoint: output.outpoint,
-        reason: outputRecord ? "already marked spent" : "output not in wallet",
-      });
-      return;
-    }
-
-    // Try to load spend tx from database first
-    let spendTx: Transaction | null = null;
-    const existingTx = await this.storage.runAsStorageProvider(async (sp) => {
-      const txs = await sp.findTransactions({
-        partial: { userId, txid: output.spendTxid },
-      });
-      return txs.length > 0 ? txs[0] : null;
-    });
-
-    if (existingTx?.rawTx) {
-      // Already in database with proof - no need to verify again
-      spendTx = Transaction.fromBinary(existingTx.rawTx);
-    } else {
-      // Not in database - fetch from network and verify
-      const beefBytes = await this.services.beef.getBeef(output.spendTxid);
-      spendTx = Transaction.fromBEEF(Array.from(beefBytes));
-
-      // Verify the transaction using SPV
-      const chainTracker = await this.services.getChainTracker();
-      const isValid = await spendTx.verify(chainTracker);
-      if (!isValid) {
-        this.emit("sync:error", {
-          address,
-          error: new Error(
-            `Spend tx ${output.spendTxid} failed SPV verification`,
-          ),
-        });
-        return;
-      }
-    }
-
-    // Verify our outpoint is in the spend tx inputs
-    const inputFound = spendTx.inputs.some(
-      (input) =>
-        input.sourceTXID === spentTxid && input.sourceOutputIndex === spentVout,
-    );
-    if (!inputFound) {
-      this.emit("sync:error", {
-        address,
-        error: new Error(
-          `Outpoint ${output.outpoint} not found in spend tx ${output.spendTxid} inputs`,
-        ),
-      });
-      return;
-    }
-
-    // Mark our output as spent
-    seenTxids.add(output.spendTxid);
-    const outputId = outputRecord.outputId;
-    if (outputId) {
-      await this.storage.runAsStorageProvider(async (sp) => {
-        await sp.updateOutput(outputId, {
-          spendable: false,
-        });
-      });
-    }
-
-    this.emit("sync:skipped", {
-      address,
-      outpoint: output.outpoint,
-      reason: "marked as spent",
-    });
-  }
-
-  /**
-   * Stop syncing a specific address.
-   */
-  stopSync(address: string): void {
-    const unsubscribe = this.activeSyncs.get(address);
-    if (unsubscribe) {
-      unsubscribe();
-      this.activeSyncs.delete(address);
-    }
-  }
-
-  /**
-   * Close the wallet and cleanup all active sync connections.
-   */
-  close(): void {
-    // Stop multi-owner sync
-    this.stopSyncAll();
-    // Stop individual address syncs
-    for (const unsubscribe of this.activeSyncs.values()) {
-      unsubscribe();
-    }
-    this.activeSyncs.clear();
-    this.services.close();
-  }
-
-  /**
-   * Start syncing all owner addresses using a single multi-owner SSE connection.
-   * This is more efficient than syncing each address individually.
-   *
-   * @param fromScore - Starting score (for pagination/resumption)
-   */
-  syncAll(fromScore = 0): void {
-    // Stop any existing multi-sync
-    this.stopSyncAll();
 
     const addresses = Array.from(this.owners);
     if (addresses.length === 0) {
       return;
     }
 
-    // For a single address, fall back to syncAddress for backwards compatibility
-    if (addresses.length === 1) {
-      this.syncAddress(addresses[0], fromScore);
-      return;
-    }
+    this.syncRunning = true;
+    this.syncStopRequested = false;
 
-    // Emit sync start event
-    this.emit("syncAll:start", { addresses, fromScore });
+    // Reset any items stuck in "processing" from a previous crashed session
+    await this.syncQueue.resetProcessing();
 
-    // Track txids seen during this sync session to avoid redundant DB lookups
-    const seenTxids = new Set<string>();
+    // Get last queued score from queue state
+    const state = await this.syncQueue.getState();
+    const fromScore = state.lastQueuedScore;
 
-    const processOutput = async (output: SyncOutput) => {
-      // Emit syncAll:output for each output received
-      this.emit("syncAll:output", { output });
-      const txid = output.outpoint.substring(0, 64);
+    this.emit("sync:start", { addresses });
 
-      // Check if we've already processed this txid in this session
-      if (seenTxids.has(txid)) {
-        this.emit("syncAll:skipped", {
-          outpoint: output.outpoint,
-          reason: "already processed in this session",
-        });
-        // Still need to check spend txid
-        if (output.spendTxid && !seenTxids.has(output.spendTxid)) {
-          await this.processSpendTxMulti(output, seenTxids);
-        }
-        return;
-      }
-
-      const vout = Number.parseInt(output.outpoint.substring(65), 10);
-      const hasOutput = await this.storage.runAsStorageProvider(async (sp) => {
-        const outputs = await sp.findOutputs({ partial: { txid, vout } });
-        return outputs.length > 0;
-      });
-
-      if (!hasOutput) {
-        if (output.spendTxid) {
-          // Already spent and we don't have the output - skip
-          seenTxids.add(txid);
-          this.emit("syncAll:skipped", {
-            outpoint: output.outpoint,
-            reason: "already spent, skipping historical output",
-          });
-          return;
-        }
-        // Unspent - fetch and ingest
-        const tx = await this.loadTransaction(txid);
-        const result = await this.ingestTransaction(tx, "1sat-sync");
-        seenTxids.add(txid);
-        this.emit("syncAll:parsed", {
-          txid,
-          parseContext: result.parseContext,
-          internalizedCount: result.internalizedCount,
-        });
-      } else {
-        seenTxids.add(txid);
-        if (output.spendTxid) {
-          await this.processSpendTxMulti(output, seenTxids);
-        } else {
-          this.emit("syncAll:skipped", {
-            outpoint: output.outpoint,
-            reason: "already have output in storage",
-          });
-        }
-      }
-    };
-
-    // Use owner.syncMulti from services
+    // Start SSE stream
+    let streamDone = false;
     const unsubscribe = this.services.owner.syncMulti(
       addresses,
-      (output) => {
-        processOutput(output);
+      async (output) => {
+        await this.handleSyncOutput(output);
       },
       fromScore,
       () => {
-        // onDone
-        this.activeMultiSync = null;
-        this.emit("syncAll:complete", { addresses });
+        streamDone = true;
       },
       (error) => {
-        // onError
-        this.activeMultiSync = null;
-        this.emit("syncAll:error", { error });
+        streamDone = true;
+        this.emit("sync:error", { message: error.message });
       },
     );
 
-    this.activeMultiSync = unsubscribe;
+    this.activeQueueSync = unsubscribe;
+
+    // Start processing loop
+    await this.processQueueLoop(streamDone, () => streamDone);
+
+    this.syncRunning = false;
+    this.activeQueueSync = null;
   }
 
   /**
-   * Process a spend transaction during multi-owner sync.
-   * Only marks our output as spent - doesn't ingest the spend tx.
+   * Handle a single output from the SSE stream.
+   * Enqueues to the sync queue and updates lastQueuedScore with reorg protection.
    */
-  private async processSpendTxMulti(
-    output: SyncOutput,
-    seenTxids: Set<string>,
-  ): Promise<void> {
-    if (!output.spendTxid || seenTxids.has(output.spendTxid)) {
-      return;
-    }
+  private async handleSyncOutput(output: SyncOutput): Promise<void> {
+    if (!this.syncQueue) return;
 
-    // Parse the outpoint to get txid and vout
-    const spentTxid = output.outpoint.substring(0, 64);
-    const spentVout = Number.parseInt(output.outpoint.substring(65), 10);
-
-    // Check if we have this output and it's not already marked spent
-    const userId = await this.storage.getUserId();
-    const outputRecord = await this.storage.runAsStorageProvider(async (sp) => {
-      const outputs = await sp.findOutputs({
-        partial: { userId, txid: spentTxid, vout: spentVout },
-      });
-      return outputs.length > 0 ? outputs[0] : null;
-    });
-
-    // Skip if we don't have this output or it's already spent
-    if (!outputRecord || !outputRecord.spendable) {
-      seenTxids.add(output.spendTxid);
-      this.emit("syncAll:skipped", {
+    // Enqueue the output
+    await this.syncQueue.enqueue([
+      {
         outpoint: output.outpoint,
-        reason: outputRecord ? "already marked spent" : "output not in wallet",
+        score: output.score,
+        spendTxid: output.spendTxid,
+      },
+    ]);
+
+    // Update lastQueuedScore with reorg protection
+    const blockHeight = Math.floor(output.score);
+    const currentHeight = await this.services.getHeight();
+    if (blockHeight <= currentHeight - REORG_SAFE_DEPTH) {
+      await this.syncQueue.setState({
+        lastQueuedScore: output.score,
+        lastSyncedAt: Date.now(),
       });
-      return;
     }
+  }
 
-    // Try to load spend tx from database first
-    let spendTx: Transaction | null = null;
-    const existingTx = await this.storage.runAsStorageProvider(async (sp) => {
-      const txs = await sp.findTransactions({
-        partial: { userId, txid: output.spendTxid },
+  /**
+   * Process queue in batches until empty or stopped.
+   */
+  private async processQueueLoop(
+    _streamDone: boolean,
+    isStreamDone: () => boolean,
+  ): Promise<void> {
+    if (!this.syncQueue) return;
+
+    while (!this.syncStopRequested) {
+      // claim() returns items already grouped by txid, all marked as "processing"
+      const byTxid = await this.syncQueue.claim(this.syncBatchSize);
+
+      if (byTxid.size === 0) {
+        if (isStreamDone()) {
+          // Stream done and queue empty - sync complete
+          this.emit("sync:complete", {});
+          break;
+        }
+        // Queue empty but stream still running - wait a bit
+        await new Promise((r) => setTimeout(r, 100));
+        continue;
+      }
+
+      // Process each txid in parallel
+      await Promise.all(
+        Array.from(byTxid.entries()).map(([txid, txidItems]) =>
+          this.processTxid(txid, txidItems),
+        ),
+      );
+
+      // Emit progress
+      const stats = await this.syncQueue.getStats();
+      this.emit("sync:progress", {
+        pending: stats.pending,
+        done: stats.done,
+        failed: stats.failed,
       });
-      return txs.length > 0 ? txs[0] : null;
-    });
+    }
+  }
 
-    if (existingTx?.rawTx) {
-      // Already in database with proof - no need to verify again
-      spendTx = Transaction.fromBinary(existingTx.rawTx);
-    } else {
-      // Not in database - fetch from network and verify
-      const beefBytes = await this.services.beef.getBeef(output.spendTxid);
-      spendTx = Transaction.fromBEEF(Array.from(beefBytes));
-
-      // Verify the transaction using SPV
-      const chainTracker = await this.services.getChainTracker();
-      const isValid = await spendTx.verify(chainTracker);
-      if (!isValid) {
-        this.emit("syncAll:error", {
-          error: new Error(
-            `Spend tx ${output.spendTxid} failed SPV verification`,
-          ),
-        });
-        return;
+  /**
+   * Group queue items by txid.
+   * @deprecated - claim() now returns items already grouped
+   */
+  private groupItemsByTxid(
+    items: SyncQueueItem[],
+  ): Map<string, SyncQueueItem[]> {
+    const byTxid = new Map<string, SyncQueueItem[]>();
+    for (const item of items) {
+      const txid = item.outpoint.substring(0, 64);
+      const existing = byTxid.get(txid);
+      if (existing) {
+        existing.push(item);
+      } else {
+        byTxid.set(txid, [item]);
       }
     }
+    return byTxid;
+  }
 
-    // Verify our outpoint is in the spend tx inputs
-    const inputFound = spendTx.inputs.some(
-      (input) =>
-        input.sourceTXID === spentTxid && input.sourceOutputIndex === spentVout,
-    );
-    if (!inputFound) {
-      this.emit("syncAll:error", {
-        error: new Error(
-          `Outpoint ${output.outpoint} not found in spend tx ${output.spendTxid} inputs`,
-        ),
+  /**
+   * Process a single txid - ingest transaction and complete queue items.
+   * Items are already marked as "processing" by claim().
+   */
+  private async processTxid(
+    txid: string,
+    items: SyncQueueItem[],
+  ): Promise<void> {
+    if (!this.syncQueue) return;
+
+    try {
+      const itemIds = items.map((i) => i.id);
+
+      // Build spend map: vout -> spendTxid
+      const spendMap = new Map<number, string>();
+      for (const item of items) {
+        if (item.spendTxid) {
+          const vout = Number.parseInt(item.outpoint.substring(65), 10);
+          spendMap.set(vout, item.spendTxid);
+        }
+      }
+
+      // Check if this is purely a spend-only batch (all items have spendTxid, no new outputs)
+      const hasUnspentCreation = items.some((item) => !item.spendTxid);
+
+      if (hasUnspentCreation) {
+        // Need to ingest the transaction
+        await this.ingestWithSpendInfo(txid, spendMap);
+      } else {
+        // All items are spends - just mark outputs as spent
+        await this.markOutputsSpent(items);
+      }
+
+      // Complete all items
+      await this.syncQueue.completeMany(itemIds);
+    } catch (error) {
+      this.emit("sync:error", {
+        message: error instanceof Error ? error.message : String(error),
       });
-      return;
-    }
 
-    // Mark our output as spent
-    seenTxids.add(output.spendTxid);
-    const outputId = outputRecord.outputId;
-    if (outputId) {
+      // Mark items as failed
+      for (const item of items) {
+        await this.syncQueue.fail(item.id, String(error));
+      }
+    }
+  }
+
+  /**
+   * Ingest a transaction with knowledge of which outputs are already spent.
+   */
+  private async ingestWithSpendInfo(
+    txid: string,
+    spendMap: Map<number, string>,
+  ): Promise<void> {
+    // Load and ingest the transaction
+    const tx = await this.loadTransaction(txid);
+    const result = await this.ingestTransaction(tx, "1sat-sync");
+
+    // Mark any outputs that we know are spent
+    if (spendMap.size > 0) {
+      const userId = await this.storage.getUserId();
       await this.storage.runAsStorageProvider(async (sp) => {
-        await sp.updateOutput(outputId, {
-          spendable: false,
-        });
+        for (const [vout, spendTxid] of spendMap) {
+          const outputs = await sp.findOutputs({
+            partial: { userId, txid, vout },
+          });
+          if (outputs.length > 0 && outputs[0].spendable) {
+            const output = outputs[0];
+            if (output.outputId) {
+              await sp.updateOutput(output.outputId, { spendable: false });
+            }
+          }
+        }
       });
     }
+  }
 
-    this.emit("syncAll:skipped", {
-      outpoint: output.outpoint,
-      reason: "marked as spent",
+  /**
+   * Mark outputs as spent for spend-only queue items.
+   */
+  private async markOutputsSpent(items: SyncQueueItem[]): Promise<void> {
+    const userId = await this.storage.getUserId();
+
+    await this.storage.runAsStorageProvider(async (sp) => {
+      for (const item of items) {
+        if (!item.spendTxid) continue;
+
+        const txid = item.outpoint.substring(0, 64);
+        const vout = Number.parseInt(item.outpoint.substring(65), 10);
+
+        const outputs = await sp.findOutputs({
+          partial: { userId, txid, vout },
+        });
+
+        if (outputs.length > 0 && outputs[0].spendable) {
+          const output = outputs[0];
+          if (output.outputId) {
+            await sp.updateOutput(output.outputId, { spendable: false });
+          }
+        }
+      }
     });
   }
 
   /**
-   * Stop the multi-owner sync.
+   * Stop the sync.
    */
-  stopSyncAll(): void {
-    if (this.activeMultiSync) {
-      this.activeMultiSync();
-      this.activeMultiSync = null;
+  stopSync(): void {
+    this.syncStopRequested = true;
+    if (this.activeQueueSync) {
+      this.activeQueueSync();
+      this.activeQueueSync = null;
     }
+    // Also stop individual components
+    this.stopStream();
+    this.stopProcessor();
   }
 
   /**
-   * Start syncing each owner address individually.
-   * For most cases, use syncAll() instead which uses a single connection.
+   * Close the wallet and cleanup all sync connections.
    */
-  syncEach(): void {
-    for (const addr of this.owners) {
-      this.syncAddress(addr);
+  close(): void {
+    this.stopSync();
+    this.services.close();
+  }
+
+  /**
+   * Check if sync is currently running.
+   */
+  isSyncing(): boolean {
+    return this.syncRunning;
+  }
+
+  /**
+   * Get the sync queue instance (if provided).
+   */
+  getQueue(): SyncQueueStorage | null {
+    return this.syncQueue;
+  }
+
+  // ===== Separate Stream/Processor Controls (for testing) =====
+
+  /**
+   * Start only the SSE stream, enqueueing outputs without processing.
+   * Useful for testing to observe queue buildup.
+   */
+  async startStream(): Promise<void> {
+    if (!this.syncQueue) {
+      throw new Error("syncQueue not provided");
     }
+    if (this.sseStreamActive) {
+      return;
+    }
+
+    const addresses = Array.from(this.owners);
+    if (addresses.length === 0) {
+      return;
+    }
+
+    const state = await this.syncQueue.getState();
+    const fromScore = state.lastQueuedScore;
+
+    this.sseStreamActive = true;
+    this.streamDone = false;
+
+    this.emit("sync:start", { addresses });
+
+    this.sseUnsubscribe = this.services.owner.syncMulti(
+      addresses,
+      async (output) => {
+        await this.handleSyncOutput(output);
+      },
+      fromScore,
+      () => {
+        this.streamDone = true;
+        this.sseStreamActive = false;
+      },
+      (error) => {
+        this.streamDone = true;
+        this.sseStreamActive = false;
+        this.emit("sync:error", { message: error.message });
+      },
+    );
+  }
+
+  /**
+   * Stop the SSE stream.
+   */
+  stopStream(): void {
+    if (this.sseUnsubscribe) {
+      this.sseUnsubscribe();
+      this.sseUnsubscribe = null;
+    }
+    this.sseStreamActive = false;
+  }
+
+  /**
+   * Check if SSE stream is active.
+   */
+  isStreamActive(): boolean {
+    return this.sseStreamActive;
+  }
+
+  /**
+   * Check if SSE stream has completed.
+   */
+  isStreamDone(): boolean {
+    return this.streamDone;
+  }
+
+  /**
+   * Start only the queue processor, without starting a new SSE stream.
+   * Useful for testing to process queued items independently.
+   */
+  async startProcessor(): Promise<void> {
+    if (!this.syncQueue) {
+      throw new Error("syncQueue not provided");
+    }
+    if (this.processorActive) {
+      return;
+    }
+
+    this.processorActive = true;
+    this.processorStopRequested = false;
+
+    // Reset any items stuck in "processing" from a previous crashed session
+    await this.syncQueue.resetProcessing();
+
+    while (!this.processorStopRequested) {
+      // claim() returns items already grouped by txid, all marked as "processing"
+      const byTxid = await this.syncQueue.claim(this.syncBatchSize);
+
+      if (byTxid.size === 0) {
+        // Queue empty - wait a bit and check again
+        await new Promise((r) => setTimeout(r, 100));
+        continue;
+      }
+
+      // Process each txid in parallel
+      await Promise.all(
+        Array.from(byTxid.entries()).map(([txid, txidItems]) =>
+          this.processTxid(txid, txidItems),
+        ),
+      );
+
+      // Emit progress
+      const stats = await this.syncQueue.getStats();
+      this.emit("sync:progress", {
+        pending: stats.pending,
+        done: stats.done,
+        failed: stats.failed,
+      });
+    }
+
+    this.processorActive = false;
+  }
+
+  /**
+   * Stop the queue processor.
+   */
+  stopProcessor(): void {
+    this.processorStopRequested = true;
+  }
+
+  /**
+   * Check if queue processor is active.
+   */
+  isProcessorActive(): boolean {
+    return this.processorActive;
   }
 }
