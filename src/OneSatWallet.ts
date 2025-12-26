@@ -795,6 +795,9 @@ export class OneSatWallet extends Wallet {
     const state = await this.syncQueue.getState();
     const fromScore = state.lastQueuedScore;
 
+    // Fetch current height once for reorg protection checks
+    const currentHeight = await this.services.getHeight();
+
     this.emit("sync:start", { addresses });
 
     // Start SSE stream
@@ -802,7 +805,7 @@ export class OneSatWallet extends Wallet {
     const unsubscribe = this.services.owner.syncMulti(
       addresses,
       async (output) => {
-        await this.handleSyncOutput(output);
+        await this.handleSyncOutput(output, currentHeight);
       },
       fromScore,
       () => {
@@ -827,7 +830,10 @@ export class OneSatWallet extends Wallet {
    * Handle a single output from the SSE stream.
    * Enqueues to the sync queue and updates lastQueuedScore with reorg protection.
    */
-  private async handleSyncOutput(output: SyncOutput): Promise<void> {
+  private async handleSyncOutput(
+    output: SyncOutput,
+    currentHeight: number,
+  ): Promise<void> {
     if (!this.syncQueue) return;
 
     // Enqueue the output
@@ -841,7 +847,6 @@ export class OneSatWallet extends Wallet {
 
     // Update lastQueuedScore with reorg protection
     const blockHeight = Math.floor(output.score);
-    const currentHeight = await this.services.getHeight();
     if (blockHeight <= currentHeight - REORG_SAFE_DEPTH) {
       await this.syncQueue.setState({
         lastQueuedScore: output.score,
@@ -973,17 +978,20 @@ export class OneSatWallet extends Wallet {
     if (spendMap.size > 0) {
       const userId = await this.storage.getUserId();
       await this.storage.runAsStorageProvider(async (sp) => {
-        for (const [vout, spendTxid] of spendMap) {
-          const outputs = await sp.findOutputs({
-            partial: { userId, txid, vout },
-          });
-          if (outputs.length > 0 && outputs[0].spendable) {
-            const output = outputs[0];
-            if (output.outputId) {
-              await sp.updateOutput(output.outputId, { spendable: false });
+        await sp.transaction(async (trx) => {
+          for (const [vout] of spendMap) {
+            const outputs = await sp.findOutputs({
+              partial: { userId, txid, vout },
+              trx,
+            });
+            if (outputs.length > 0 && outputs[0].spendable) {
+              const output = outputs[0];
+              if (output.outputId) {
+                await sp.updateOutput(output.outputId, { spendable: false }, trx);
+              }
             }
           }
-        }
+        });
       });
     }
   }
@@ -995,23 +1003,23 @@ export class OneSatWallet extends Wallet {
     const userId = await this.storage.getUserId();
 
     await this.storage.runAsStorageProvider(async (sp) => {
-      for (const item of items) {
-        if (!item.spendTxid) continue;
+      await sp.transaction(async (trx) => {
+        for (const item of items) {
+          if (!item.spendTxid) continue;
 
-        const txid = item.outpoint.substring(0, 64);
-        const vout = Number.parseInt(item.outpoint.substring(65), 10);
+          const txid = item.outpoint.substring(0, 64);
+          const vout = Number.parseInt(item.outpoint.substring(65), 10);
 
-        const outputs = await sp.findOutputs({
-          partial: { userId, txid, vout },
-        });
+          const outputs = await sp.findOutputs({
+            partial: { userId, txid, vout },
+            trx,
+          });
 
-        if (outputs.length > 0 && outputs[0].spendable) {
-          const output = outputs[0];
-          if (output.outputId) {
-            await sp.updateOutput(output.outputId, { spendable: false });
+          if (outputs.length > 0 && outputs[0].spendable && outputs[0].outputId) {
+            await sp.updateOutput(outputs[0].outputId, { spendable: false }, trx);
           }
         }
-      }
+      });
     });
   }
 
@@ -1073,6 +1081,9 @@ export class OneSatWallet extends Wallet {
     const state = await this.syncQueue.getState();
     const fromScore = state.lastQueuedScore;
 
+    // Fetch current height once for reorg protection checks
+    const currentHeight = await this.services.getHeight();
+
     this.sseStreamActive = true;
     this.streamDone = false;
 
@@ -1081,7 +1092,7 @@ export class OneSatWallet extends Wallet {
     this.sseUnsubscribe = this.services.owner.syncMulti(
       addresses,
       async (output) => {
-        await this.handleSyncOutput(output);
+        await this.handleSyncOutput(output, currentHeight);
       },
       fromScore,
       () => {

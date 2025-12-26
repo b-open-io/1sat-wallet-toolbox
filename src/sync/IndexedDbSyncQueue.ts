@@ -36,6 +36,10 @@ export class IndexedDbSyncQueue implements SyncQueueStorage {
 
       request.onerror = () => reject(request.error);
 
+      request.onblocked = () => {
+        reject(new Error("Database blocked - close other tabs"));
+      };
+
       request.onsuccess = () => {
         this.db = request.result;
         resolve(this.db);

@@ -33,6 +33,7 @@ const state: AppState = {
 
 // Instances (initialized on dashboard)
 let syncQueue: IndexedDbSyncQueue | null = null;
+let statsQueue: IndexedDbSyncQueue | null = null; // Persistent queue for stats polling
 let wallet: OneSatWallet | null = null;
 let storage: WalletStorageManager | null = null;
 let statsInterval: ReturnType<typeof setInterval> | null = null;
@@ -198,15 +199,18 @@ async function renderDashboard() {
   let stats: SyncQueueStats = { pending: 0, processing: 0, done: 0, failed: 0 };
   let syncState: SyncState = { lastQueuedScore: 0 };
 
+  // Initialize persistent stats queue if not already created
+  if (!statsQueue) {
+    statsQueue = new IndexedDbSyncQueue(state.identityKey);
+  }
+
   // Try to get existing queue stats
-  const tempQueue = new IndexedDbSyncQueue(state.identityKey);
   try {
-    stats = await tempQueue.getStats();
-    syncState = await tempQueue.getState();
+    stats = await statsQueue.getStats();
+    syncState = await statsQueue.getState();
   } catch {
     // Queue doesn't exist yet, use defaults
   }
-  await tempQueue.close();
 
   app.innerHTML = `
     <div class="dashboard-page">
@@ -285,6 +289,23 @@ async function renderDashboard() {
             <div class="placeholder">Select a status to view queue items</div>
           </div>
         </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Wallet Outputs</h2>
+            <div class="button-group">
+              <button class="btn btn-sm" id="basket-fund-btn">fund</button>
+              <button class="btn btn-sm" id="basket-1sat-btn">1sat</button>
+              <button class="btn btn-sm" id="basket-bsv21-btn">bsv21</button>
+              <button class="btn btn-sm" id="basket-opns-btn">opns</button>
+              <button class="btn btn-sm" id="basket-lock-btn">lock</button>
+              <button class="btn btn-sm" id="basket-default-btn">default</button>
+            </div>
+          </div>
+          <div class="wallet-outputs" id="wallet-outputs">
+            <div class="placeholder">Select a basket to view outputs</div>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -299,6 +320,12 @@ async function renderDashboard() {
   document.getElementById("view-processing-btn")?.addEventListener("click", () => viewQueueItems("processing"));
   document.getElementById("view-done-btn")?.addEventListener("click", () => viewQueueItems("done"));
   document.getElementById("view-failed-btn")?.addEventListener("click", () => viewQueueItems("failed"));
+  document.getElementById("basket-fund-btn")?.addEventListener("click", () => viewBasketOutputs("fund"));
+  document.getElementById("basket-1sat-btn")?.addEventListener("click", () => viewBasketOutputs("1sat"));
+  document.getElementById("basket-bsv21-btn")?.addEventListener("click", () => viewBasketOutputs("bsv21"));
+  document.getElementById("basket-opns-btn")?.addEventListener("click", () => viewBasketOutputs("opns"));
+  document.getElementById("basket-lock-btn")?.addEventListener("click", () => viewBasketOutputs("lock"));
+  document.getElementById("basket-default-btn")?.addEventListener("click", () => viewBasketOutputs("default"));
 
   // Start stats polling
   statsInterval = setInterval(updateStats, 500);
@@ -343,28 +370,16 @@ function renderSyncState(syncState: SyncState): string {
 }
 
 async function updateStats() {
-  if (!syncQueue && !wallet) {
-    // Use temp queue to read stats
-    const tempQueue = new IndexedDbSyncQueue(state.identityKey);
-    try {
-      const stats = await tempQueue.getStats();
-      const syncState = await tempQueue.getState();
-      updateStatsDisplay(stats, syncState);
-    } catch {
-      // Ignore
-    }
-    await tempQueue.close();
-    return;
-  }
+  // Use the active syncQueue if available, otherwise use persistent statsQueue
+  const queue = syncQueue || statsQueue;
+  if (!queue) return;
 
-  if (syncQueue) {
-    try {
-      const stats = await syncQueue.getStats();
-      const syncState = await syncQueue.getState();
-      updateStatsDisplay(stats, syncState);
-    } catch {
-      // Queue might be closed
-    }
+  try {
+    const stats = await queue.getStats();
+    const syncState = await queue.getState();
+    updateStatsDisplay(stats, syncState);
+  } catch {
+    // Queue might be closed or not ready
   }
 }
 
@@ -510,6 +525,10 @@ function handleLogout() {
     syncQueue.close();
     syncQueue = null;
   }
+  if (statsQueue) {
+    statsQueue.close();
+    statsQueue = null;
+  }
   storage = null;
   state.isSyncing = false;
   state.page = "login";
@@ -599,6 +618,57 @@ async function viewQueueItems(status: SyncQueueItemStatus) {
     container.innerHTML = `<div class="placeholder error">Error: ${error}</div>`;
   } finally {
     await tempQueue.close();
+  }
+}
+
+async function viewBasketOutputs(basket: string) {
+  const container = document.getElementById("wallet-outputs");
+  if (!container) return;
+
+  if (!wallet) {
+    container.innerHTML = '<div class="placeholder">Initialize wallet first (start sync or stream)</div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="placeholder">Loading...</div>';
+
+  try {
+    const result = await wallet.listOutputs({ basket, limit: 100 });
+
+    if (result.outputs.length === 0) {
+      container.innerHTML = `<div class="placeholder">No outputs in basket "${basket}"</div>`;
+      return;
+    }
+
+    let totalSats = 0;
+    let html = `<div class="output-summary">Showing ${result.outputs.length} outputs in "${basket}" (total: ${result.totalOutputs})</div>`;
+    html += '<div class="output-list">';
+
+    for (const output of result.outputs) {
+      const outpoint = output.outpoint;
+      const txid = outpoint.substring(0, 64);
+      const vout = outpoint.substring(65);
+      totalSats += output.satoshis;
+
+      html += `<div class="output-item">
+        <div class="output-main">
+          <span class="output-txid">${txid}</span>
+          <span class="output-vout">:${vout}</span>
+          <span class="output-sats">${output.satoshis} sats</span>
+        </div>
+        <div class="output-details">
+          ${output.tags?.length ? `<span>Tags: ${output.tags.join(", ")}</span>` : ""}
+          ${output.customInstructions ? `<span class="output-instructions">${truncate(output.customInstructions, 100)}</span>` : ""}
+        </div>
+      </div>`;
+    }
+
+    html += "</div>";
+    const totalBsv = totalSats / 100000000;
+    html += `<div class="output-total">Total: ${totalSats.toLocaleString()} sats (${totalBsv.toFixed(8)} BSV)</div>`;
+    container.innerHTML = html;
+  } catch (error) {
+    container.innerHTML = `<div class="placeholder error">Error: ${error}</div>`;
   }
 }
 
