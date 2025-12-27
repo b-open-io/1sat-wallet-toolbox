@@ -19,7 +19,7 @@ export class OrdfsClient extends BaseClient {
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
     super(`${baseUrl}/api/ordfs`, options);
-    this.contentBaseUrl = baseUrl.replace(/\/$/, "");
+    this.contentBaseUrl = `${baseUrl.replace(/\/$/, "")}/content`;
   }
 
   /**
