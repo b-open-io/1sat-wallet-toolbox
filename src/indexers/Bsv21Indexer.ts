@@ -57,26 +57,59 @@ export class Bsv21Indexer extends Indexer {
     const outpoint = txo.outpoint;
     const tokenData = decoded.tokenData;
 
-    // Create indexer data structure
+    // Determine token ID - for deploy ops it's this outpoint, otherwise from inscription
+    const tokenId = tokenData.id || outpoint.toString();
+
+    // Determine initial status:
+    // - deploy ops (deploy+mint, deploy+auth) are always valid (they create the token)
+    // - transfer/burn ops start as pending until validated in summarize()
+    const isDeploy = tokenData.op.startsWith("deploy");
+    const initialStatus: "valid" | "pending" = isDeploy ? "valid" : "pending";
+
+    // Create indexer data structure with basic info from inscription
     const bsv21: Bsv21 = {
-      id: tokenData.id || outpoint.toString(),
+      id: tokenId,
       op: tokenData.op,
       amt: decoded.getAmount(),
       dec: decoded.getDecimals(),
       sym: tokenData.sym,
       icon: tokenData.icon,
-      status: tokenData.op === "deploy+mint" ? "valid" : "pending",
+      status: initialStatus,
       fundAddress: deriveFundAddress(outpoint.toBEBinary()),
     };
+
+    // For non-deploy ops, fetch token metadata from server (cached)
+    // This ensures we always have sym, dec, icon for any token
+    if (!isDeploy) {
+      try {
+        const details = await this.services.bsv21.getTokenDetails(tokenId);
+        bsv21.sym = details.sym;
+        bsv21.icon = resolveIcon(details.icon, tokenId);
+        bsv21.dec = details.dec;
+      } catch (e) {
+        // Token not found on server - could be unconfirmed or invalid
+        // Keep local values from inscription, status remains pending
+        if (!(e instanceof HttpError && e.status === 404)) {
+          throw e;
+        }
+      }
+    } else {
+      // For deploy ops, resolve relative icon reference if present
+      bsv21.icon = resolveIcon(bsv21.icon, tokenId);
+    }
 
     // Validate amount range
     if (bsv21.amt <= 0n || bsv21.amt > 2n ** 64n - 1n) return;
 
     const tags: string[] = [];
     if (txo.owner && this.owners.has(txo.owner)) {
-      tags.push(`id:${bsv21.id}`);
+      // Use id:tokenId:status format for querying by token and status
       tags.push(`id:${bsv21.id}:${bsv21.status}`);
       tags.push(`amt:${bsv21.amt.toString()}`);
+      // Add metadata tags for efficient querying
+      if (bsv21.sym) tags.push(`sym:${bsv21.sym}`);
+      if (bsv21.icon) tags.push(`icon:${bsv21.icon}`);
+      tags.push(`dec:${bsv21.dec}`);
     }
 
     return {
@@ -87,16 +120,15 @@ export class Bsv21Indexer extends Indexer {
   }
 
   async summarize(ctx: ParseContext): Promise<IndexSummary | undefined> {
-    const tokens: {
+    // Track token flows per token ID for validation
+    const tokenFlows: {
       [id: string]: {
-        sym?: string;
-        icon?: string;
-        dec: number;
-        status?: "valid" | "invalid" | "pending";
         tokensIn: bigint;
         tokensOut: bigint;
+        inputsPending: boolean;
       };
     } = {};
+
     let summaryToken: Bsv21 | undefined;
     let summaryBalance = 0;
 
@@ -107,52 +139,38 @@ export class Bsv21Indexer extends Indexer {
 
       const tokenData = bsv21.data as Bsv21;
 
-      // Initialize token tracking if this is the first time we see this token
-      if (!tokens[tokenData.id]) {
-        tokens[tokenData.id] = {
-          sym: undefined,
-          icon: undefined,
-          dec: 0,
-          status: undefined,
+      // Initialize token tracking
+      if (!tokenFlows[tokenData.id]) {
+        tokenFlows[tokenData.id] = {
           tokensIn: 0n,
           tokensOut: 0n,
+          inputsPending: false,
         };
       }
 
-      const token = tokens[tokenData.id];
+      const flow = tokenFlows[tokenData.id];
 
-      // Validate this specific input against the overlay
+      // Validate this input exists on the overlay
       try {
-        const overlayData = await this.services.bsv21.getTokenByTxid(
+        await this.services.bsv21.getTokenByTxid(
           tokenData.id,
           spend.outpoint.txid,
         );
-        const outputData = overlayData.outputs.find(
-          (o) => o.vout === spend.outpoint.vout,
-        );
-        const bsv21OverlayData = outputData?.data.bsv21;
-
-        // Set token metadata from overlay (only the first time we get valid overlay data)
-        if (token.sym === undefined) {
-          token.sym = bsv21OverlayData?.sym;
-          token.icon = bsv21OverlayData?.icon;
-          token.dec = bsv21OverlayData?.dec || 0;
-        }
       } catch (e) {
         if (e instanceof HttpError && e.status === 404) {
-          // Overlay doesn't have this input - mark as pending
-          token.status = "pending";
+          // Input not on overlay yet - outputs will be pending
+          flow.inputsPending = true;
         } else {
           throw e;
         }
       }
 
       // Accumulate tokens in
-      token.tokensIn += tokenData.amt;
+      flow.tokensIn += tokenData.amt;
 
       if (!summaryToken) summaryToken = tokenData;
 
-      // Check if this input is owned by us
+      // Track balance change for owned inputs
       if (
         summaryToken &&
         tokenData.id === summaryToken.id &&
@@ -163,26 +181,25 @@ export class Bsv21Indexer extends Indexer {
       }
     }
 
-    // Process outputs: accumulate tokensOut
+    // Process outputs: accumulate tokensOut and validate
     for (const txo of ctx.txos) {
       const bsv21 = txo.data.bsv21;
       if (!bsv21 || !["transfer", "burn"].includes((bsv21.data as Bsv21).op))
         continue;
 
       const tokenData = bsv21.data as Bsv21;
-      const token = tokens[tokenData.id];
+      const flow = tokenFlows[tokenData.id];
 
-      if (token) {
-        token.tokensOut += tokenData.amt;
-        tokenData.sym = token.sym;
-        tokenData.icon = token.icon;
-        tokenData.dec = token.dec;
+      if (flow) {
+        flow.tokensOut += tokenData.amt;
       } else {
-        // No inputs for this token - attempting to spend tokens that don't exist
+        // No inputs for this token - invalid (attempting to create tokens from nothing)
         tokenData.status = "invalid";
       }
 
       if (!summaryToken) summaryToken = tokenData;
+
+      // Track balance change for owned outputs
       if (
         summaryToken &&
         tokenData.id === summaryToken.id &&
@@ -193,29 +210,25 @@ export class Bsv21Indexer extends Indexer {
       }
     }
 
-    // Finalize token validation: check that tokensIn >= tokensOut
-    for (const tokenId in tokens) {
-      const token = tokens[tokenId];
-      if (token.status === undefined) {
-        if (token.tokensIn >= token.tokensOut) {
-          token.status = "valid";
-        } else {
-          token.status = "invalid";
-        }
-      }
-    }
-
-    // Apply token metadata and status to outputs
+    // Finalize validation and apply status to outputs
     for (const txo of ctx.txos) {
       const bsv21 = txo.data.bsv21;
       if (!bsv21 || !["transfer", "burn"].includes((bsv21.data as Bsv21).op))
         continue;
 
       const tokenData = bsv21.data as Bsv21;
-      const token = tokens[tokenData.id];
+      if (tokenData.status === "invalid") continue; // Already marked invalid
 
-      if (token) {
-        tokenData.status = token.status || "pending";
+      const flow = tokenFlows[tokenData.id];
+      if (!flow) continue;
+
+      // Determine final status
+      if (flow.inputsPending) {
+        tokenData.status = "pending";
+      } else if (flow.tokensIn >= flow.tokensOut) {
+        tokenData.status = "valid";
+      } else {
+        tokenData.status = "invalid";
       }
     }
 
@@ -242,6 +255,26 @@ export class Bsv21Indexer extends Indexer {
       amt: BigInt(obj.amt),
     };
   }
+}
+
+/**
+ * Resolve a relative icon reference to an absolute outpoint.
+ * If icon starts with "_", it's a relative reference to another output
+ * in the same transaction as the token deploy. We resolve it by
+ * prepending the token ID's txid.
+ *
+ * Example: tokenId = "abc123...def_0", icon = "_1" -> "abc123...def_1"
+ */
+function resolveIcon(
+  icon: string | undefined,
+  tokenId: string,
+): string | undefined {
+  if (!icon || !icon.startsWith("_")) return icon;
+
+  // Token ID format is "txid_vout", extract the txid
+  const txid = tokenId.substring(0, 64);
+  // Icon format is "_vout", combine with txid
+  return `${txid}${icon}`;
 }
 
 export function deriveFundAddress(idOrOutpoint: string | number[]): string {
