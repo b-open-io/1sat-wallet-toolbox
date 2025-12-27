@@ -802,7 +802,7 @@ export class OneSatWallet extends Wallet {
 
     // Start SSE stream
     let streamDone = false;
-    const unsubscribe = this.services.owner.syncMulti(
+    const unsubscribe = this.services.owner.sync(
       addresses,
       async (output) => {
         await this.handleSyncOutput(output, currentHeight);
@@ -1089,7 +1089,7 @@ export class OneSatWallet extends Wallet {
 
     this.emit("sync:start", { addresses });
 
-    this.sseUnsubscribe = this.services.owner.syncMulti(
+    this.sseUnsubscribe = this.services.owner.sync(
       addresses,
       async (output) => {
         await this.handleSyncOutput(output, currentHeight);

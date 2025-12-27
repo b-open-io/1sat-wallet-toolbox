@@ -1,7 +1,6 @@
 import type {
   ClientOptions,
   IndexedOutput,
-  SearchRequest,
   SpendResponse,
   TxoQueryOptions,
 } from "../types";
@@ -12,13 +11,12 @@ import { BaseClient } from "./BaseClient";
  * Provides TXO (transaction output) lookup and search.
  *
  * Routes:
- * - GET /outpoint/:outpoint - Get single TXO
- * - GET /outpoint/:outpoint/spend - Get spend info
+ * - GET /:outpoint - Get single TXO (outpoint pattern-matched)
+ * - GET /:outpoint/spend - Get spend info
  * - POST /outpoints - Get multiple TXOs
- * - POST /outpoints/spends - Get multiple spends
+ * - POST /spends - Get multiple spends
  * - GET /tx/:txid - Get all TXOs for a transaction
- * - GET /search/:key - Search by single key
- * - POST /search - Search by multiple keys
+ * - GET /search?key=... - Search by key(s)
  */
 export class TxoClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
@@ -32,7 +30,7 @@ export class TxoClient extends BaseClient {
     const qs = this.buildQueryString({
       tags: opts?.tags,
     });
-    return this.request<IndexedOutput>(`/outpoint/${outpoint}${qs}`);
+    return this.request<IndexedOutput>(`/${outpoint}${qs}`);
   }
 
   /**
@@ -56,9 +54,7 @@ export class TxoClient extends BaseClient {
    * Get spend info for an outpoint
    */
   async getSpend(outpoint: string): Promise<string | null> {
-    const resp = await this.request<SpendResponse>(
-      `/outpoint/${outpoint}/spend`,
-    );
+    const resp = await this.request<SpendResponse>(`/${outpoint}/spend`);
     return resp.spendTxid;
   }
 
@@ -66,7 +62,7 @@ export class TxoClient extends BaseClient {
    * Get spend info for multiple outpoints
    */
   async getSpends(outpoints: string[]): Promise<(string | null)[]> {
-    const resp = await this.request<SpendResponse[]>("/outpoints/spends", {
+    const resp = await this.request<SpendResponse[]>("/spends", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(outpoints),
@@ -88,29 +84,24 @@ export class TxoClient extends BaseClient {
   }
 
   /**
-   * Search TXOs by a single key
+   * Search TXOs by key(s)
    */
-  async search(key: string, opts?: TxoQueryOptions): Promise<IndexedOutput[]> {
+  async search(
+    keys: string | string[],
+    opts?: TxoQueryOptions,
+  ): Promise<IndexedOutput[]> {
     const qs = this.buildQueryString({
+      key: Array.isArray(keys) ? keys : [keys],
       tags: opts?.tags,
       from: opts?.from,
       limit: opts?.limit,
       rev: opts?.rev,
       unspent: opts?.unspent,
+      sats: opts?.sats,
+      spend: opts?.spend,
+      events: opts?.events,
+      block: opts?.block,
     });
-    return this.request<IndexedOutput[]>(
-      `/search/${encodeURIComponent(key)}${qs}`,
-    );
-  }
-
-  /**
-   * Search TXOs by multiple keys
-   */
-  async searchMultiple(req: SearchRequest): Promise<IndexedOutput[]> {
-    return this.request<IndexedOutput[]>("/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-    });
+    return this.request<IndexedOutput[]>(`/search${qs}`);
   }
 }

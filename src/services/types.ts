@@ -118,19 +118,19 @@ export interface Policy {
 // ============================================================================
 
 /**
- * Indexed transaction output
+ * Indexed transaction output.
+ * Base fields (outpoint, score) are always present.
+ * Other fields are present based on query options.
  */
 export interface IndexedOutput {
   outpoint: string;
-  satoshis: number;
-  script?: string;
-  height?: number;
-  idx?: number;
-  owners?: string[];
+  score: number;
+  satoshis?: number;
+  blockHeight?: number;
+  blockIdx?: number;
+  spend?: string;
   events?: string[];
   data?: Record<string, unknown>;
-  spend?: string;
-  score: number;
 }
 
 /**
@@ -144,10 +144,6 @@ export interface SpendResponse {
  * Options for querying TXOs
  */
 export interface TxoQueryOptions {
-  /** Tags to include in response data */
-  tags?: string[];
-  /** Include script in response */
-  script?: boolean;
   /** Starting score for pagination */
   from?: number;
   /** Maximum results to return */
@@ -156,17 +152,15 @@ export interface TxoQueryOptions {
   rev?: boolean;
   /** Filter for unspent only */
   unspent?: boolean;
-}
-
-/**
- * Search request for multiple keys
- */
-export interface SearchRequest {
-  keys: string[];
-  limit?: number;
-  from?: number;
-  reverse?: boolean;
-  unspent?: boolean;
+  /** Include satoshis in response */
+  sats?: boolean;
+  /** Include spend txid in response */
+  spend?: boolean;
+  /** Include events array in response */
+  events?: boolean;
+  /** Include blockHeight and blockIdx in response */
+  block?: boolean;
+  /** Data tags to include in response */
   tags?: string[];
 }
 
