@@ -37,13 +37,13 @@ export type { SyncOutput };
  * interface required by wallet-toolbox.
  *
  * API Routes:
- * - /api/chaintracks/* - Block headers and chain tracking
- * - /api/beef/* - Raw transactions and proofs
- * - /api/arcade/* - Transaction broadcasting
- * - /api/bsv21/* - BSV21 token data
- * - /api/txo/* - Transaction outputs
- * - /api/owner/* - Address queries and sync
- * - /api/ordfs/* - Content/inscription serving
+ * - /1sat/chaintracks/* - Block headers and chain tracking
+ * - /1sat/beef/* - Raw transactions and proofs
+ * - /1sat/arcade/* - Transaction broadcasting
+ * - /1sat/bsv21/* - BSV21 token data
+ * - /1sat/txo/* - Transaction outputs
+ * - /1sat/owner/* - Address queries and sync
+ * - /1sat/ordfs/* - Content/inscription serving
  */
 export class OneSatServices implements WalletServices {
   chain: Chain;

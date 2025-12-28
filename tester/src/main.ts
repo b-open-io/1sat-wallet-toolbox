@@ -67,7 +67,7 @@ function renderLogin() {
             type="text" 
             id="api-url" 
             value="${state.apiUrl}"
-            placeholder="http://localhost:8080/api"
+            placeholder="http://localhost:8080"
           />
         </div>
 

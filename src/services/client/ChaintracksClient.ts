@@ -62,7 +62,7 @@ async function parseHeader(
 }
 
 /**
- * Client for /api/chaintracks/* routes.
+ * Client for /1sat/chaintracks/* routes.
  * Provides block header data and implements ChainTracker interface.
  *
  * Routes:
@@ -79,7 +79,7 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
   private subscribers: Set<(header: BlockHeader) => void> = new Set();
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(`${baseUrl}/api/chaintracks`, options);
+    super(`${baseUrl}/1sat/chaintracks`, options);
   }
 
   /**

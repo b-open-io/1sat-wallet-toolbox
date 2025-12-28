@@ -11,13 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Modular API Client Architecture** - New specialized clients in `src/services/client/`:
   - `BaseClient` - Shared HTTP utilities with timeout and error handling
-  - `ChaintracksClient` - Block headers and chain tracking (`/api/chaintracks/*`)
-  - `BeefClient` - Raw transactions and BEEF proofs (`/api/beef/*`)
-  - `ArcadeClient` - Transaction broadcasting (`/api/arcade/*`)
-  - `TxoClient` - Transaction output queries (`/api/txo/*`)
-  - `OwnerClient` - Address queries with SSE sync (`/api/owner/*`)
-  - `OrdfsClient` - Content and inscription metadata (`/api/ordfs/*`)
-  - `Bsv21Client` - BSV21 token data (`/api/bsv21/*`)
+  - `ChaintracksClient` - Block headers and chain tracking (`/1sat/chaintracks/*`)
+  - `BeefClient` - Raw transactions and BEEF proofs (`/1sat/beef/*`)
+  - `ArcadeClient` - Transaction broadcasting (`/1sat/arcade/*`)
+  - `TxoClient` - Transaction output queries (`/1sat/txo/*`)
+  - `OwnerClient` - Address queries with SSE sync (`/1sat/owner/*`)
+  - `OrdfsClient` - Content and inscription metadata (`/1sat/ordfs/*`)
+  - `Bsv21Client` - BSV21 token data (`/1sat/bsv21/*`)
 - **Public client access** - Clients exposed as `readonly` properties on OneSatServices
   (e.g., `services.beef`, `services.owner`)
 - **Architecture documentation** - Added `docs/INTERFACE_CLEANUP.md` and

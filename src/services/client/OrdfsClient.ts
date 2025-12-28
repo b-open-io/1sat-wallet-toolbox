@@ -11,15 +11,15 @@ import { BaseClient } from "./BaseClient";
  * Client for ordfs routes.
  * Provides inscription content and metadata.
  *
- * Content is served from baseUrl directly (e.g., https://api.1sat.app/:outpoint)
- * API routes use /api/ordfs (e.g., https://api.1sat.app/api/ordfs/metadata/:outpoint)
+ * Content is served from /1sat/content (e.g., https://api.1sat.app/1sat/content/:outpoint)
+ * API routes use /1sat/ordfs (e.g., https://api.1sat.app/1sat/ordfs/metadata/:outpoint)
  */
 export class OrdfsClient extends BaseClient {
   private readonly contentBaseUrl: string;
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(`${baseUrl}/api/ordfs`, options);
-    this.contentBaseUrl = `${baseUrl.replace(/\/$/, "")}/content`;
+    super(`${baseUrl}/1sat/ordfs`, options);
+    this.contentBaseUrl = `${baseUrl.replace(/\/$/, "")}/1sat/content`;
   }
 
   /**

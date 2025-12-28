@@ -7,7 +7,7 @@ import type {
 import { BaseClient } from "./BaseClient";
 
 /**
- * Client for /api/txo/* routes.
+ * Client for /1sat/txo/* routes.
  * Provides TXO (transaction output) lookup and search.
  *
  * Routes:
@@ -20,7 +20,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class TxoClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(`${baseUrl}/api/txo`, options);
+    super(`${baseUrl}/1sat/txo`, options);
   }
 
   /**

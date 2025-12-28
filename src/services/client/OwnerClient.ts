@@ -8,7 +8,7 @@ import type {
 import { BaseClient } from "./BaseClient";
 
 /**
- * Client for /api/owner/* routes.
+ * Client for /1sat/owner/* routes.
  * Provides owner (address) queries and sync.
  *
  * Routes:
@@ -18,7 +18,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class OwnerClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(`${baseUrl}/api/owner`, options);
+    super(`${baseUrl}/1sat/owner`, options);
   }
 
   /**

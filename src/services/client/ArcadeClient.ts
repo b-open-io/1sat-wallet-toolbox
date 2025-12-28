@@ -8,7 +8,7 @@ import type {
 import { BaseClient } from "./BaseClient";
 
 /**
- * Client for /api/arcade/* routes.
+ * Client for /1sat/arcade/* routes.
  * Provides transaction broadcast and status checking.
  *
  * Routes:
@@ -20,7 +20,7 @@ import { BaseClient } from "./BaseClient";
  */
 export class ArcadeClient extends BaseClient {
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(`${baseUrl}/api/arcade`, options);
+    super(`${baseUrl}/1sat/arcade`, options);
   }
 
   /**

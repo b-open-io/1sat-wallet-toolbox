@@ -7,7 +7,7 @@ import type {
 import { BaseClient } from "./BaseClient";
 
 /**
- * Client for /api/bsv21/* routes.
+ * Client for /1sat/bsv21/* routes.
  * Provides BSV21 token queries.
  *
  * Routes:
@@ -22,7 +22,7 @@ export class Bsv21Client extends BaseClient {
   private cache = new Map<string, Bsv21TokenDetails>();
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
-    super(`${baseUrl}/api/bsv21`, options);
+    super(`${baseUrl}/1sat/bsv21`, options);
   }
 
   /**

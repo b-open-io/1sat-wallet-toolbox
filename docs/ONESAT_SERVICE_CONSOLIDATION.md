@@ -693,8 +693,8 @@ await services.postBeef(beef, txids);
 - [ ] Update tests
 
 ### Not Implemented (low priority)
-- [ ] Create `src/services/client/IndexerClient.ts` - for /api/indexer/* routes
-- [ ] Create `src/services/client/SseClient.ts` - for /api/sse/* general pubsub
+- [ ] Create `src/services/client/IndexerClient.ts` - for /1sat/indexer/* routes
+- [ ] Create `src/services/client/SseClient.ts` - for /1sat/sse/* general pubsub
 
 ### Route Updates (COMPLETED)
 - [x] Update `/block` to `/chaintracks` for ChaintracksClient

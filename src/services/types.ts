@@ -22,20 +22,20 @@ export interface ClientOptions {
 // ============================================================================
 
 /**
- * Server capabilities returned by /api/capabilities endpoint.
+ * Server capabilities returned by /1sat/capabilities endpoint.
  * These match the actual capability names from 1sat-stack.
  */
 export type Capability =
-  | "beef" // BEEF storage, raw tx, proofs (/api/beef)
-  | "pubsub" // SSE subscriptions (/api/sse)
-  | "txo" // TXO lookup (/api/txo)
-  | "owner" // Owner queries (/api/owner)
-  | "indexer" // Indexer operations (/api/indexer)
-  | "bsv21" // BSV21 tokens (/api/bsv21)
-  | "ordfs" // Content serving (/api/ordfs)
-  | "chaintracks" // Block headers (/api/chaintracks)
-  | "arcade" // TX broadcast (/api/arcade)
-  | "overlay"; // Overlay engine (/api/overlay)
+  | "beef" // BEEF storage, raw tx, proofs (/1sat/beef)
+  | "pubsub" // SSE subscriptions (/1sat/sse)
+  | "txo" // TXO lookup (/1sat/txo)
+  | "owner" // Owner queries (/1sat/owner)
+  | "indexer" // Indexer operations (/1sat/indexer)
+  | "bsv21" // BSV21 tokens (/1sat/bsv21)
+  | "ordfs" // Content serving (/1sat/ordfs)
+  | "chaintracks" // Block headers (/1sat/chaintracks)
+  | "arcade" // TX broadcast (/1sat/arcade)
+  | "overlay"; // Overlay engine (/1sat/overlay)
 
 // ============================================================================
 // Chaintracks Types (Block Headers)
