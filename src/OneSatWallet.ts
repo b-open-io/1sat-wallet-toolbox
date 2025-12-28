@@ -1,5 +1,6 @@
 import {
   Beef,
+  Hash,
   KeyDeriver,
   type PrivateKey,
   Random,
@@ -408,7 +409,9 @@ export class OneSatWallet extends Wallet {
 
     // Fall back to network
     const beefBytes = await this.services.beef.getBeef(txid);
-    return Transaction.fromBEEF(Array.from(beefBytes));
+    const tx = Transaction.fromBEEF(Array.from(beefBytes));
+    console.log(`[loadTransaction] ${txid} merklePath:`, tx.merklePath ? `height=${tx.merklePath.blockHeight}` : 'NONE');
+    return tx;
   }
 
   /**
@@ -451,6 +454,48 @@ export class OneSatWallet extends Wallet {
   }
 
   /**
+   * Calculate the byte offset and length of each output's locking script
+   * within the raw transaction binary. This is needed for wallet-toolbox's
+   * listOutputs to extract locking scripts on demand.
+   */
+  private calculateScriptOffsets(
+    tx: Transaction,
+  ): Array<{ offset: number; length: number }> {
+    const rawTx = tx.toBinary();
+    const reader = new Utils.Reader(rawTx);
+
+    // Skip version (4 bytes)
+    reader.pos = 4;
+
+    // Read input count (varint)
+    const inputCount = reader.readVarIntNum();
+
+    // Skip all inputs
+    for (let i = 0; i < inputCount; i++) {
+      reader.pos += 32; // txid
+      reader.pos += 4; // vout
+      const scriptLen = reader.readVarIntNum();
+      reader.pos += scriptLen; // unlocking script
+      reader.pos += 4; // sequence
+    }
+
+    // Read output count (varint)
+    const outputCount = reader.readVarIntNum();
+
+    // Calculate offset for each output's locking script
+    const offsets: Array<{ offset: number; length: number }> = [];
+    for (let i = 0; i < outputCount; i++) {
+      reader.pos += 8; // satoshis (8 bytes)
+      const scriptLen = reader.readVarIntNum();
+      const scriptOffset = reader.pos;
+      reader.pos += scriptLen; // locking script
+      offsets.push({ offset: scriptOffset, length: scriptLen });
+    }
+
+    return offsets;
+  }
+
+  /**
    * Ingest a transaction by running it through indexers and writing directly to storage.
    *
    * This is the main entry point for adding external transactions to the wallet.
@@ -476,6 +521,9 @@ export class OneSatWallet extends Wallet {
     const ctx = await this.parseTransaction(tx, isBroadcasted);
     const txid = tx.id("hex");
 
+    // Calculate script offsets for all outputs (needed for listOutputs with locking scripts)
+    const scriptOffsets = this.calculateScriptOffsets(tx);
+
     // Collect owned outputs
     const ownedTxos = ctx.txos.filter(
       (txo) => txo.owner && this.owners.has(txo.owner),
@@ -483,6 +531,17 @@ export class OneSatWallet extends Wallet {
 
     // Get userId from storage manager
     const userId = await this.storage.getUserId();
+
+    // Pre-fetch header for merkle proof BEFORE starting the IDB transaction
+    // This avoids IDB auto-commit issue caused by network calls inside transaction
+    let provenTxBlockHash: string | undefined;
+    let provenTxMerkleRoot: string | undefined;
+    if (tx.merklePath) {
+      const mp = tx.merklePath;
+      const header = await this.services.getHeaderForHeight(mp.blockHeight);
+      provenTxBlockHash = Utils.toHex(Hash.hash256(header).reverse());
+      provenTxMerkleRoot = mp.computeRoot();
+    }
 
     // Write directly to storage within a transaction
     const internalizedCount = await this.storage.runAsStorageProvider(
@@ -560,43 +619,69 @@ export class OneSatWallet extends Wallet {
             transactionId = await sp.insertTransaction(newTx, trx);
             isNewTransaction = true;
 
-            // Persist source transactions (inputs) so we don't have to fetch them again
-            const txQueue = [...tx.inputs];
-            for (const input of txQueue) {
-              if (!input.sourceTransaction) continue;
-              const sourceTxid = input.sourceTransaction.id("hex");
-
-              // Check if already exists
-              const existing = await sp.findTransactions({
-                partial: { userId, txid: sourceTxid },
+            // Store in ProvenTx or ProvenTxReq for listOutputs compatibility
+            // This enables include: 'entire transactions' and 'locking scripts'
+            console.log(`[ingestTransaction] ${txid} hasMerklePath:`, !!tx.merklePath, 'hasBlockHash:', !!provenTxBlockHash);
+            if (tx.merklePath && provenTxBlockHash && provenTxMerkleRoot) {
+              // Transaction has merkle proof - store as ProvenTx
+              const existingProven = await sp.findProvenTxs({
+                partial: { txid },
                 trx,
               });
-              if (existing.length > 0) continue;
+              if (existingProven.length === 0) {
+                const mp = tx.merklePath;
+                const index =
+                  mp.path[0].find((l) => l.hash === txid)?.offset ?? 0;
 
-              // Insert source transaction
-              const sourceNow = new Date();
-              const sourceRef = Utils.toBase64(Random(12));
-              await sp.insertTransaction(
-                {
-                  created_at: sourceNow,
-                  updated_at: sourceNow,
-                  transactionId: 0,
-                  userId,
-                  status: "completed" as const,
-                  reference: sourceRef,
-                  isOutgoing: false,
-                  satoshis: 0,
-                  description: "source transaction",
-                  version: input.sourceTransaction.version,
-                  lockTime: input.sourceTransaction.lockTime,
-                  txid: sourceTxid,
-                  rawTx: Array.from(input.sourceTransaction.toBinary()),
-                },
+                const provenNow = new Date();
+                console.log(`[ingestTransaction] Inserting ProvenTx for ${txid} height=${mp.blockHeight} rawTxLen=${tx.toBinary().length}`);
+                await sp.insertProvenTx(
+                  {
+                    created_at: provenNow,
+                    updated_at: provenNow,
+                    provenTxId: 0,
+                    txid,
+                    height: mp.blockHeight,
+                    index,
+                    merklePath: mp.toBinary(),
+                    rawTx: Array.from(tx.toBinary()),
+                    blockHash: provenTxBlockHash,
+                    merkleRoot: provenTxMerkleRoot,
+                  },
+                  trx,
+                );
+              } else {
+                console.log(`[ingestTransaction] ProvenTx already exists for ${txid}`);
+              }
+            } else if (!tx.merklePath) {
+              // No merkle proof - store as ProvenTxReq (pending confirmation)
+              const existingReq = await sp.findProvenTxReqs({
+                partial: { txid },
                 trx,
-              );
+              });
+              if (existingReq.length === 0) {
+                // Build inputBEEF from source transactions
+                const inputBeef = new Beef();
+                inputBeef.mergeTransaction(tx);
 
-              // Add source transaction's inputs to queue
-              txQueue.push(...input.sourceTransaction.inputs);
+                const reqNow = new Date();
+                await sp.insertProvenTxReq(
+                  {
+                    created_at: reqNow,
+                    updated_at: reqNow,
+                    provenTxReqId: 0,
+                    status: isBroadcasted ? "unmined" : "unsent",
+                    attempts: 0,
+                    notified: false,
+                    txid,
+                    history: "[]",
+                    notify: "{}",
+                    rawTx: Array.from(tx.toBinary()),
+                    inputBEEF: inputBeef.toBinary(),
+                  },
+                  trx,
+                );
+              }
             }
 
             // Add labels
@@ -685,6 +770,7 @@ export class OneSatWallet extends Wallet {
 
             // Create output record
             const now = new Date();
+            const scriptInfo = scriptOffsets[txo.outpoint.vout];
             const newOutput = {
               created_at: now,
               updated_at: now,
@@ -702,6 +788,8 @@ export class OneSatWallet extends Wallet {
               type: "custom",
               txid,
               lockingScript: Array.from(txo.output.lockingScript.toBinary()),
+              scriptOffset: scriptInfo?.offset,
+              scriptLength: scriptInfo?.length,
               spentBy: undefined,
               customInstructions: content?.substring(0, 1000),
             };
