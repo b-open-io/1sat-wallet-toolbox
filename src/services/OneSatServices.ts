@@ -174,9 +174,8 @@ export class OneSatServices implements WalletServices {
           continue;
         }
 
-        const status = await this.arcade.submitTransaction(
-          beefTx.tx.toBinary(),
-        );
+        // Use Extended Format (EF) which includes source transaction data
+        const status = await this.arcade.submitTransaction(beefTx.tx.toEF());
 
         if (
           status.txStatus === "MINED" ||
