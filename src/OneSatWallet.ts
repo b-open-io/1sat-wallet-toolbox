@@ -507,11 +507,14 @@ export class OneSatWallet extends Wallet {
             let satoshisSpent = 0;
 
             for (const input of tx.inputs) {
-              if (input.sourceTXID) {
+              // Get source txid from either sourceTXID or sourceTransaction
+              const sourceTxid =
+                input.sourceTXID || input.sourceTransaction?.id("hex");
+              if (sourceTxid) {
                 const spentOutputs = await sp.findOutputs({
                   partial: {
                     userId,
-                    txid: input.sourceTXID,
+                    txid: sourceTxid,
                     vout: input.sourceOutputIndex,
                   },
                   trx,
@@ -612,11 +615,14 @@ export class OneSatWallet extends Wallet {
           // Mark inputs as spent (only for new transactions)
           if (isNewTransaction) {
             for (const input of tx.inputs) {
-              if (input.sourceTXID) {
+              // Get source txid from either sourceTXID or sourceTransaction
+              const sourceTxid =
+                input.sourceTXID || input.sourceTransaction?.id("hex");
+              if (sourceTxid) {
                 const spentOutputs = await sp.findOutputs({
                   partial: {
                     userId,
-                    txid: input.sourceTXID,
+                    txid: sourceTxid,
                     vout: input.sourceOutputIndex,
                   },
                   trx,
