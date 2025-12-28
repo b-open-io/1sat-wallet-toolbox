@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2025-12-28
+
+### Fixed
+
+- **Transaction ingestion** - Fixed transaction ingestion in OneSatWallet
+
 ## [0.0.5] - 2025-12-27
 
 ### Fixed
@@ -25,24 +31,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Sync Queue System** - New background sync processing with persistent storage:
-  - `IndexedDbSyncQueue` - Browser IndexedDB storage for queue state
-  - `SqliteSyncQueue` - SQLite storage for Node/Bun environments
-  - Queue-based processing with claim/complete/fail semantics
-  - Automatic recovery of stuck "processing" items on restart
+- **Sync Queue System** - New queue-based sync architecture for background transaction processing:
+  - `IndexedDbSyncQueue` - Browser implementation using IndexedDB
+  - `SqliteSyncQueue` - Node/Bun implementation using SQLite
+  - Decouples SSE ingestion from transaction processing
+  - Enables resumability across app restarts
+  - Multi-tenant isolation via `accountId`
   - Design documentation in `docs/SYNC_QUEUE_DESIGN.md`
+- **OrdfsClient improvements**:
+  - `getContent()` now returns response headers (content-type, origin, sequence)
+  - Sequence number support for inscription versioning (`outpoint:seq`)
+  - `previewHtml()` for base64-encoded HTML content
+  - Dedicated content URL builder with format options
+- **New exports**:
+  - Sync queue types (`SyncQueueStorage`, `SyncQueueItem`, `SyncState`, etc.)
+  - Re-exports from `@bsv/wallet-toolbox/mobile`: `WalletStorageManager`, `StorageProvider`, `StorageIdb`
+  - Additional ORDFS types: `OrdfsContentOptions`, `OrdfsContentResponse`, `OrdfsResponseHeaders`
 
 ### Changed
 
 - **OneSatWallet refactored** - Queue-based sync architecture with `SyncQueueStorage` integration
-- **OwnerClient updated** - Server route changes for `/api/owner/*` endpoints
-- **TxoClient updated** - Server route changes for `/api/txo/*` endpoints
+- **OwnerClient updated** - Server route changes
+- **TxoClient updated** - Server route changes
 - **OrdfsClient enhanced** - Additional metadata capabilities
+- **IndexedOutput type simplified** - Removed `script`, `owners` fields; renamed `height`/`idx` to `blockHeight`/`blockIdx`
+- **TxoQueryOptions streamlined** - Removed `tags` and `script` options
 - **Indexer improvements** - Bsv21Indexer, InscriptionIndexer, OriginIndexer, MapIndexer, OrdLockIndexer updates
 
 ### Fixed
 
 - **BSV21 token icon** - Fixed token icon display in Bsv21Indexer
+- **OriginIndexer** - Fixed origin parsing edge cases
 
 ## [0.0.2] - 2025-12-19
 
