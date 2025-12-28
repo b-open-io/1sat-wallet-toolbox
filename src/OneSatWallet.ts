@@ -410,7 +410,6 @@ export class OneSatWallet extends Wallet {
     // Fall back to network
     const beefBytes = await this.services.beef.getBeef(txid);
     const tx = Transaction.fromBEEF(Array.from(beefBytes));
-    console.log(`[loadTransaction] ${txid} merklePath:`, tx.merklePath ? `height=${tx.merklePath.blockHeight}` : 'NONE');
     return tx;
   }
 
@@ -621,7 +620,6 @@ export class OneSatWallet extends Wallet {
 
             // Store in ProvenTx or ProvenTxReq for listOutputs compatibility
             // This enables include: 'entire transactions' and 'locking scripts'
-            console.log(`[ingestTransaction] ${txid} hasMerklePath:`, !!tx.merklePath, 'hasBlockHash:', !!provenTxBlockHash);
             if (tx.merklePath && provenTxBlockHash && provenTxMerkleRoot) {
               // Transaction has merkle proof - store as ProvenTx
               const existingProven = await sp.findProvenTxs({
@@ -634,7 +632,6 @@ export class OneSatWallet extends Wallet {
                   mp.path[0].find((l) => l.hash === txid)?.offset ?? 0;
 
                 const provenNow = new Date();
-                console.log(`[ingestTransaction] Inserting ProvenTx for ${txid} height=${mp.blockHeight} rawTxLen=${tx.toBinary().length}`);
                 await sp.insertProvenTx(
                   {
                     created_at: provenNow,
@@ -650,8 +647,6 @@ export class OneSatWallet extends Wallet {
                   },
                   trx,
                 );
-              } else {
-                console.log(`[ingestTransaction] ProvenTx already exists for ${txid}`);
               }
             } else if (!tx.merklePath) {
               // No merkle proof - store as ProvenTxReq (pending confirmation)
