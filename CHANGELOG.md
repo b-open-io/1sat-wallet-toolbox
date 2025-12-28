@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2025-12-27
+
+### Changed
+
+- **API routes updated** - All clients now use `/1sat/*` routes instead of `/api/*`
+
+### Fixed
+
+- **Broadcast** - Fixed broadcast in OneSatServices
+
+## [0.0.3] - 2025-12-27
+
+### Added
+
+- **Sync Queue System** - New background sync processing with persistent storage:
+  - `IndexedDbSyncQueue` - Browser IndexedDB storage for queue state
+  - `SqliteSyncQueue` - SQLite storage for Node/Bun environments
+  - Queue-based processing with claim/complete/fail semantics
+  - Automatic recovery of stuck "processing" items on restart
+  - Design documentation in `docs/SYNC_QUEUE_DESIGN.md`
+
+### Changed
+
+- **OneSatWallet refactored** - Queue-based sync architecture with `SyncQueueStorage` integration
+- **OwnerClient updated** - Server route changes for `/api/owner/*` endpoints
+- **TxoClient updated** - Server route changes for `/api/txo/*` endpoints
+- **OrdfsClient enhanced** - Additional metadata capabilities
+- **Indexer improvements** - Bsv21Indexer, InscriptionIndexer, OriginIndexer, MapIndexer, OrdLockIndexer updates
+
+### Fixed
+
+- **BSV21 token icon** - Fixed token icon display in Bsv21Indexer
+
 ## [0.0.2] - 2025-12-19
 
 ### Added
