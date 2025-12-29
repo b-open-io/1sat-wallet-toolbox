@@ -26,10 +26,3 @@ export * from "./indexers";
 
 // Sync Queue
 export * from "./sync";
-
-// Re-export wallet-toolbox types for consumers
-export {
-  WalletStorageManager,
-  StorageProvider,
-} from "@bsv/wallet-toolbox/mobile";
-export { StorageIdb } from "@bsv/wallet-toolbox/mobile/out/src/storage/StorageIdb";

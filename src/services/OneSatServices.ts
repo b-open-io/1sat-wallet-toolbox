@@ -1,21 +1,37 @@
 import { Beef, Hash, MerklePath, Transaction, Utils } from "@bsv/sdk";
-import type { WalletStorageManager } from "@bsv/wallet-toolbox/mobile";
-import { WalletError } from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletError";
 import type {
-  BlockHeader,
-  GetMerklePathResult,
-  GetRawTxResult,
-  GetScriptHashHistoryResult,
-  GetStatusForTxidsResult,
-  GetUtxoStatusOutputFormat,
-  GetUtxoStatusResult,
-  PostBeefResult,
-  ServiceCallHistory,
-  ServicesCallHistory,
-  WalletServices,
-} from "@bsv/wallet-toolbox/mobile/out/src/sdk/WalletServices.interfaces";
-import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
-import type { TableOutput } from "@bsv/wallet-toolbox/mobile/out/src/storage/schema/tables/TableOutput";
+  TableOutput,
+  WalletStorageManager,
+  sdk as toolboxSdk,
+} from "@bsv/wallet-toolbox";
+
+type Chain = toolboxSdk.Chain;
+type BlockHeader = toolboxSdk.BlockHeader;
+type GetMerklePathResult = toolboxSdk.GetMerklePathResult;
+type GetRawTxResult = toolboxSdk.GetRawTxResult;
+type GetScriptHashHistoryResult = toolboxSdk.GetScriptHashHistoryResult;
+type GetStatusForTxidsResult = toolboxSdk.GetStatusForTxidsResult;
+type GetUtxoStatusOutputFormat = toolboxSdk.GetUtxoStatusOutputFormat;
+type GetUtxoStatusResult = toolboxSdk.GetUtxoStatusResult;
+type PostBeefResult = toolboxSdk.PostBeefResult;
+type ServiceCallHistory = toolboxSdk.ServiceCallHistory;
+type ServicesCallHistory = toolboxSdk.ServicesCallHistory;
+type WalletServices = toolboxSdk.WalletServices;
+
+/**
+ * Simple error class for WalletServices error responses.
+ */
+class ServiceError extends Error {
+  isError: true = true;
+
+  constructor(
+    public code: string,
+    public description: string,
+  ) {
+    super(description);
+    this.name = code;
+  }
+}
 
 import {
   ArcadeClient,
@@ -110,10 +126,10 @@ export class OneSatServices implements WalletServices {
     } catch (error) {
       return {
         txid,
-        error: new WalletError(
+        error: new ServiceError(
           "NETWORK_ERROR",
           error instanceof Error ? error.message : "Unknown error",
-        ),
+        ) as unknown as toolboxSdk.WalletError,
       };
     }
   }
@@ -141,10 +157,10 @@ export class OneSatServices implements WalletServices {
     } catch (error) {
       return {
         name: "1sat-api",
-        error: new WalletError(
+        error: new ServiceError(
           "NETWORK_ERROR",
           error instanceof Error ? error.message : "Unknown error",
-        ),
+        ) as unknown as toolboxSdk.WalletError,
       };
     }
   }
@@ -159,10 +175,10 @@ export class OneSatServices implements WalletServices {
           results.push({
             name: "1sat-api",
             status: "error",
-            error: new WalletError(
+            error: new ServiceError(
               "TX_NOT_FOUND",
               `Transaction ${txid} not found in BEEF`,
-            ),
+            ) as unknown as toolboxSdk.WalletError,
             txidResults: [
               {
                 txid,
@@ -194,10 +210,10 @@ export class OneSatServices implements WalletServices {
           results.push({
             name: "1sat-api",
             status: "error",
-            error: new WalletError(
+            error: new ServiceError(
               status.txStatus,
               status.extraInfo || "Transaction rejected",
-            ),
+            ) as unknown as toolboxSdk.WalletError,
             txidResults: [{ txid, status: "error", data: status }],
           });
         } else {
@@ -212,10 +228,10 @@ export class OneSatServices implements WalletServices {
         results.push({
           name: "1sat-api",
           status: "error",
-          error: new WalletError(
+          error: new ServiceError(
             "NETWORK_ERROR",
             error instanceof Error ? error.message : "Unknown error",
-          ),
+          ) as unknown as toolboxSdk.WalletError,
           txidResults: [{ txid, status: "error" }],
         });
       }

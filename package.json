@@ -37,13 +37,13 @@
     "tester": "bun run build && bun run tester:build && bun ./tester/server.ts"
   },
   "dependencies": {
-    "@bopen-io/ts-templates": "^1.1.0",
-    "@bsv/sdk": "1.9.24",
-    "@bsv/wallet-toolbox": "^1.7.14",
+    "@bopen-io/templates": "^1.1.2",
+    "@bsv/sdk": "^1.9.29",
     "buffer": "^6.0.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@bsv/wallet-toolbox": "^1.7.18",
     "@types/bun": "^1.3.4",
     "typescript": "^5.9.3"
   }

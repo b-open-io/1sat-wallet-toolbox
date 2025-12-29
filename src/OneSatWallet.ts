@@ -1,18 +1,17 @@
 import {
   Beef,
   Hash,
-  KeyDeriver,
-  type PrivateKey,
   Random,
   Transaction,
   Utils,
+  type WalletInterface,
 } from "@bsv/sdk";
-import {
-  type StorageProvider,
-  Wallet,
-  type WalletStorageManager,
-} from "@bsv/wallet-toolbox/mobile";
-import type { Chain } from "@bsv/wallet-toolbox/mobile/out/src/sdk/types";
+import type {
+  StorageProvider,
+  WalletStorageManager,
+  sdk as toolboxSdk,
+} from "@bsv/wallet-toolbox";
+type Chain = toolboxSdk.Chain;
 import { Bsv21Indexer } from "./indexers/Bsv21Indexer";
 import { CosignIndexer } from "./indexers/CosignIndexer";
 import { FundIndexer } from "./indexers/FundIndexer";
@@ -26,7 +25,6 @@ import { Outpoint } from "./indexers/Outpoint";
 import { SigmaIndexer } from "./indexers/SigmaIndexer";
 import type { Indexer, ParseContext, Txo } from "./indexers/types";
 import { OneSatServices, type SyncOutput } from "./services/OneSatServices";
-import { ReadOnlySigner } from "./signers/ReadOnlySigner";
 import type { SyncQueueItem, SyncQueueStorage } from "./sync/types";
 
 /** Number of blocks to wait before considering a score "safe" from reorgs */
@@ -61,12 +59,12 @@ type EventCallback<T> = (event: T) => void;
 
 export interface OneSatWalletArgs {
   /**
-   * Either a public key hex string (read-only mode) or a PrivateKey (full signing).
+   * The underlying BRC-100 wallet to wrap.
    */
-  rootKey: string | PrivateKey;
+  wallet: WalletInterface;
 
   /**
-   * The storage manager for the wallet.
+   * The storage manager from the wallet (needed for direct storage access).
    */
   storage: WalletStorageManager;
 
@@ -109,14 +107,14 @@ export interface OneSatWalletArgs {
 }
 
 /**
- * OneSatWallet extends the BRC-100 Wallet with 1Sat-specific indexing and services.
+ * OneSatWallet wraps a BRC-100 Wallet with 1Sat-specific indexing and services.
  *
- * Can be instantiated with either:
- * - A public key (read-only mode for queries)
- * - A private key (full signing capability)
+ * The consumer is responsible for constructing the underlying Wallet with
+ * the appropriate storage and key derivation for their environment.
  */
-export class OneSatWallet extends Wallet {
-  private readonly isReadOnly: boolean;
+export class OneSatWallet implements WalletInterface {
+  private readonly wallet: WalletInterface;
+  private readonly storage: WalletStorageManager;
   private readonly indexers: Indexer[];
   readonly services: OneSatServices;
   private owners: Set<string>;
@@ -139,11 +137,8 @@ export class OneSatWallet extends Wallet {
   private streamDone = false;
 
   constructor(args: OneSatWalletArgs) {
-    const isReadOnly = typeof args.rootKey === "string";
-
-    const keyDeriver = isReadOnly
-      ? new ReadOnlySigner(args.rootKey as string)
-      : new KeyDeriver(args.rootKey as PrivateKey);
+    this.wallet = args.wallet;
+    this.storage = args.storage;
 
     const services = new OneSatServices(
       args.chain,
@@ -153,14 +148,6 @@ export class OneSatWallet extends Wallet {
     const network = args.chain === "main" ? "mainnet" : "testnet";
     const owners = args.owners || new Set<string>();
 
-    super({
-      chain: args.chain,
-      keyDeriver,
-      storage: args.storage,
-      services,
-    });
-
-    this.isReadOnly = isReadOnly;
     this.services = services;
     this.owners = owners;
 
@@ -187,13 +174,91 @@ export class OneSatWallet extends Wallet {
     }
   }
 
-  /**
-   * Returns true if this wallet was created with only a public key.
-   * Read-only wallets can query but not sign transactions.
-   */
-  get readOnly(): boolean {
-    return this.isReadOnly;
-  }
+  // ===== WalletInterface Delegation =====
+
+  getPublicKey: WalletInterface["getPublicKey"] = (args, originator) =>
+    this.wallet.getPublicKey(args, originator);
+
+  revealCounterpartyKeyLinkage: WalletInterface["revealCounterpartyKeyLinkage"] = (args, originator) =>
+    this.wallet.revealCounterpartyKeyLinkage(args, originator);
+
+  revealSpecificKeyLinkage: WalletInterface["revealSpecificKeyLinkage"] = (args, originator) =>
+    this.wallet.revealSpecificKeyLinkage(args, originator);
+
+  encrypt: WalletInterface["encrypt"] = (args, originator) =>
+    this.wallet.encrypt(args, originator);
+
+  decrypt: WalletInterface["decrypt"] = (args, originator) =>
+    this.wallet.decrypt(args, originator);
+
+  createHmac: WalletInterface["createHmac"] = (args, originator) =>
+    this.wallet.createHmac(args, originator);
+
+  verifyHmac: WalletInterface["verifyHmac"] = (args, originator) =>
+    this.wallet.verifyHmac(args, originator);
+
+  createSignature: WalletInterface["createSignature"] = (args, originator) =>
+    this.wallet.createSignature(args, originator);
+
+  verifySignature: WalletInterface["verifySignature"] = (args, originator) =>
+    this.wallet.verifySignature(args, originator);
+
+  createAction: WalletInterface["createAction"] = (args, originator) =>
+    this.wallet.createAction(args, originator);
+
+  signAction: WalletInterface["signAction"] = (args, originator) =>
+    this.wallet.signAction(args, originator);
+
+  abortAction: WalletInterface["abortAction"] = (args, originator) =>
+    this.wallet.abortAction(args, originator);
+
+  listActions: WalletInterface["listActions"] = (args, originator) =>
+    this.wallet.listActions(args, originator);
+
+  internalizeAction: WalletInterface["internalizeAction"] = (args, originator) =>
+    this.wallet.internalizeAction(args, originator);
+
+  listOutputs: WalletInterface["listOutputs"] = (args, originator) =>
+    this.wallet.listOutputs(args, originator);
+
+  relinquishOutput: WalletInterface["relinquishOutput"] = (args, originator) =>
+    this.wallet.relinquishOutput(args, originator);
+
+  acquireCertificate: WalletInterface["acquireCertificate"] = (args, originator) =>
+    this.wallet.acquireCertificate(args, originator);
+
+  listCertificates: WalletInterface["listCertificates"] = (args, originator) =>
+    this.wallet.listCertificates(args, originator);
+
+  proveCertificate: WalletInterface["proveCertificate"] = (args, originator) =>
+    this.wallet.proveCertificate(args, originator);
+
+  relinquishCertificate: WalletInterface["relinquishCertificate"] = (args, originator) =>
+    this.wallet.relinquishCertificate(args, originator);
+
+  discoverByIdentityKey: WalletInterface["discoverByIdentityKey"] = (args, originator) =>
+    this.wallet.discoverByIdentityKey(args, originator);
+
+  discoverByAttributes: WalletInterface["discoverByAttributes"] = (args, originator) =>
+    this.wallet.discoverByAttributes(args, originator);
+
+  isAuthenticated: WalletInterface["isAuthenticated"] = (args, originator) =>
+    this.wallet.isAuthenticated(args, originator);
+
+  waitForAuthentication: WalletInterface["waitForAuthentication"] = (args, originator) =>
+    this.wallet.waitForAuthentication(args, originator);
+
+  getHeight: WalletInterface["getHeight"] = (args, originator) =>
+    this.wallet.getHeight(args, originator);
+
+  getHeaderForHeight: WalletInterface["getHeaderForHeight"] = (args, originator) =>
+    this.wallet.getHeaderForHeight(args, originator);
+
+  getNetwork: WalletInterface["getNetwork"] = (args, originator) =>
+    this.wallet.getNetwork(args, originator);
+
+  getVersion: WalletInterface["getVersion"] = (args, originator) =>
+    this.wallet.getVersion(args, originator);
 
   // ===== Event Emitter =====
 
