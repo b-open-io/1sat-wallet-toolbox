@@ -28,7 +28,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target browser --define 'process.env={}' --define 'global=globalThis' --sourcemap=inline && tsc --emitDeclarationOnly",
+    "build": "tsc",
     "dev": "tsc --watch",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
