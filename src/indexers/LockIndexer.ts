@@ -1,4 +1,4 @@
-import { Lock } from "@bopen-io/ts-templates";
+import { Lock } from "@bopen-io/templates";
 import {
   type IndexSummary,
   Indexer,

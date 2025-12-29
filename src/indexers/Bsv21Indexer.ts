@@ -1,4 +1,4 @@
-import { BSV21 } from "@bopen-io/ts-templates";
+import { BSV21 } from "@bopen-io/templates";
 import { HD, Hash, Utils } from "@bsv/sdk";
 import { HttpError } from "../errors";
 import type { OneSatServices } from "../services/OneSatServices";
