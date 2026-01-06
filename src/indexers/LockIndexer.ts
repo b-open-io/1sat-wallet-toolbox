@@ -31,6 +31,7 @@ export class LockIndexer extends Indexer {
       tags,
       owner: decoded.address,
       basket: "lock",
+      protocol: "basket insertion", // Custom Lock script requires manual unlock
     };
   }
 

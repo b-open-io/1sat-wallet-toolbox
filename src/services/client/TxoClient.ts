@@ -29,6 +29,9 @@ export class TxoClient extends BaseClient {
   async get(outpoint: string, opts?: TxoQueryOptions): Promise<IndexedOutput> {
     const qs = this.buildQueryString({
       tags: opts?.tags,
+      sats: opts?.sats,
+      spend: opts?.spend,
+      block: opts?.block,
     });
     return this.request<IndexedOutput>(`/${outpoint}${qs}`);
   }
@@ -42,6 +45,9 @@ export class TxoClient extends BaseClient {
   ): Promise<(IndexedOutput | null)[]> {
     const qs = this.buildQueryString({
       tags: opts?.tags,
+      sats: opts?.sats,
+      spend: opts?.spend,
+      block: opts?.block,
     });
     return this.request<(IndexedOutput | null)[]>(`/outpoints${qs}`, {
       method: "POST",
@@ -79,6 +85,9 @@ export class TxoClient extends BaseClient {
   ): Promise<IndexedOutput[]> {
     const qs = this.buildQueryString({
       tags: opts?.tags,
+      sats: opts?.sats,
+      spend: opts?.spend,
+      block: opts?.block,
     });
     return this.request<IndexedOutput[]>(`/tx/${txid}${qs}`);
   }

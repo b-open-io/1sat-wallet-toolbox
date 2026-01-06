@@ -37,6 +37,7 @@ export class OrdLockIndexer extends Indexer {
       data: listing,
       tags: [`list:${listing.price}`],
       owner: decoded.seller,
+      protocol: "basket insertion", // OrdLock script requires manual unlock
     };
   }
 

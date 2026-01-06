@@ -1,9 +1,5 @@
 import { Beef, Hash, MerklePath, Transaction, Utils } from "@bsv/sdk";
-import type {
-  TableOutput,
-  WalletStorageManager,
-  sdk as toolboxSdk,
-} from "@bsv/wallet-toolbox";
+import { type TableOutput, type sdk as toolboxSdk } from "@bsv/wallet-toolbox";
 
 type Chain = toolboxSdk.Chain;
 type BlockHeader = toolboxSdk.BlockHeader;
@@ -11,6 +7,7 @@ type GetMerklePathResult = toolboxSdk.GetMerklePathResult;
 type GetRawTxResult = toolboxSdk.GetRawTxResult;
 type GetScriptHashHistoryResult = toolboxSdk.GetScriptHashHistoryResult;
 type GetStatusForTxidsResult = toolboxSdk.GetStatusForTxidsResult;
+type StatusForTxidResult = toolboxSdk.StatusForTxidResult;
 type GetUtxoStatusOutputFormat = toolboxSdk.GetUtxoStatusOutputFormat;
 type GetUtxoStatusResult = toolboxSdk.GetUtxoStatusResult;
 type PostBeefResult = toolboxSdk.PostBeefResult;
@@ -64,7 +61,6 @@ export type { SyncOutput };
 export class OneSatServices implements WalletServices {
   chain: Chain;
   readonly baseUrl: string;
-  private storage?: WalletStorageManager;
 
   // ===== API Clients =====
   readonly chaintracks: ChaintracksClient;
@@ -75,14 +71,29 @@ export class OneSatServices implements WalletServices {
   readonly ordfs: OrdfsClient;
   readonly bsv21: Bsv21Client;
 
-  constructor(chain: Chain, baseUrl?: string, storage?: WalletStorageManager) {
+  // Optional fallback to wallet-toolbox Services for methods we don't implement
+  private fallbackServices?: WalletServices;
+
+  /**
+   * URL for wallet storage sync endpoint (BRC-100 JSON-RPC).
+   * Used by StorageClient for remote wallet backup/sync.
+   */
+  get storageUrl(): string {
+    return `${this.baseUrl}/1sat/wallet`;
+  }
+
+  constructor(
+    chain: Chain,
+    baseUrl?: string,
+    fallbackServices?: WalletServices,
+  ) {
+    this.fallbackServices = fallbackServices;
     this.chain = chain;
     this.baseUrl =
       baseUrl ||
       (chain === "main"
         ? "https://1sat.shruggr.cloud"
         : "https://testnet.api.1sat.app");
-    this.storage = storage;
 
     const opts: ClientOptions = { timeout: 30000 };
     this.chaintracks = new ChaintracksClient(this.baseUrl, opts);
@@ -150,11 +161,31 @@ export class OneSatServices implements WalletServices {
     txid: string,
     _useNext?: boolean,
   ): Promise<GetMerklePathResult> {
+    console.log("[OneSatServices] getMerklePath called for txid:", txid);
     try {
       const proofBytes = await this.beef.getProof(txid);
-      const merklePath = MerklePath.fromBinary(Array.from(proofBytes));
-      return { name: "1sat-api", merklePath };
+      const merklePath = MerklePath.fromBinary([...proofBytes]);
+      console.log("[OneSatServices] getMerklePath got proof, blockHeight:", merklePath.blockHeight);
+
+      // Fetch the block header for this merkle path
+      const header = await this.chaintracks.findHeaderForHeight(
+        merklePath.blockHeight,
+      );
+      if (!header) {
+        console.log("[OneSatServices] getMerklePath header not found for height:", merklePath.blockHeight);
+        return {
+          name: "1sat-api",
+          error: new ServiceError(
+            "HEADER_NOT_FOUND",
+            `Block header not found for height ${merklePath.blockHeight}`,
+          ) as unknown as toolboxSdk.WalletError,
+        };
+      }
+
+      console.log("[OneSatServices] getMerklePath success, returning merklePath and header");
+      return { name: "1sat-api", merklePath, header };
     } catch (error) {
+      console.error("[OneSatServices] getMerklePath error:", error);
       return {
         name: "1sat-api",
         error: new ServiceError(
@@ -166,32 +197,20 @@ export class OneSatServices implements WalletServices {
   }
 
   async postBeef(beef: Beef, txids: string[]): Promise<PostBeefResult[]> {
+    console.log("[OneSatServices] postBeef called with txids:", txids);
     const results: PostBeefResult[] = [];
 
     for (const txid of txids) {
       try {
-        const beefTx = beef.findTxid(txid);
-        if (!beefTx?.tx) {
-          results.push({
-            name: "1sat-api",
-            status: "error",
-            error: new ServiceError(
-              "TX_NOT_FOUND",
-              `Transaction ${txid} not found in BEEF`,
-            ) as unknown as toolboxSdk.WalletError,
-            txidResults: [
-              {
-                txid,
-                status: "error",
-                data: { detail: "Transaction not found in BEEF" },
-              },
-            ],
-          });
-          continue;
-        }
-
-        // Use Extended Format (EF) which includes source transaction data
-        const status = await this.arcade.submitTransaction(beefTx.tx.toEF());
+        // Submit as AtomicBEEF which includes all source transactions
+        console.log("[OneSatServices] Submitting tx to arcade:", txid);
+        const atomicBeef = beef.toBinaryAtomic(txid);
+        // TODO: Remove hardcoded callback headers after server testing
+        const status = await this.arcade.submitTransaction(atomicBeef, {
+          callbackUrl: `${this.baseUrl}/1sat/arc/callback`,
+          callbackToken: "test-callback-token",
+        });
+        console.log("[OneSatServices] Arcade response:", status);
 
         if (
           status.txStatus === "MINED" ||
@@ -225,6 +244,7 @@ export class OneSatServices implements WalletServices {
           });
         }
       } catch (error) {
+        console.error("[OneSatServices] postBeef error:", error);
         results.push({
           name: "1sat-api",
           status: "error",
@@ -274,53 +294,210 @@ export class OneSatServices implements WalletServices {
     };
   }
 
-  // ===== WalletServices Interface (Not Yet Implemented) =====
+  // ===== WalletServices Interface (Delegated to fallback) =====
 
   async getBsvExchangeRate(): Promise<number> {
-    throw new Error("getBsvExchangeRate not yet implemented");
+    if (!this.fallbackServices) {
+      throw new Error("getBsvExchangeRate not implemented");
+    }
+    return this.fallbackServices.getBsvExchangeRate();
   }
 
   async getFiatExchangeRate(
-    _currency: "USD" | "GBP" | "EUR",
-    _base?: "USD" | "GBP" | "EUR",
+    currency: "USD" | "GBP" | "EUR",
+    base?: "USD" | "GBP" | "EUR",
   ): Promise<number> {
-    throw new Error("getFiatExchangeRate not yet implemented");
+    if (!this.fallbackServices) {
+      throw new Error("getFiatExchangeRate not implemented");
+    }
+    return this.fallbackServices.getFiatExchangeRate(currency, base);
   }
 
   async getStatusForTxids(
-    _txids: string[],
+    txids: string[],
     _useNext?: boolean,
   ): Promise<GetStatusForTxidsResult> {
-    throw new Error("getStatusForTxids not yet implemented");
+    const results: StatusForTxidResult[] = [];
+    let currentHeight: number | undefined;
+
+    for (const txid of txids) {
+      try {
+        // Try Arcade first (only knows about txs broadcast through it)
+        const status = await this.arcade.getStatus(txid);
+
+        if (status.txStatus === "MINED" || status.txStatus === "IMMUTABLE") {
+          // Get current height for depth calculation if we haven't already
+          if (currentHeight === undefined) {
+            currentHeight = await this.getHeight();
+          }
+          const depth = status.blockHeight
+            ? currentHeight - status.blockHeight + 1
+            : 1;
+          results.push({ txid, status: "mined", depth });
+        } else if (
+          status.txStatus === "SEEN_ON_NETWORK" ||
+          status.txStatus === "ACCEPTED_BY_NETWORK" ||
+          status.txStatus === "SENT_TO_NETWORK" ||
+          status.txStatus === "RECEIVED"
+        ) {
+          results.push({ txid, status: "known", depth: 0 });
+        } else {
+          // REJECTED, DOUBLE_SPEND_ATTEMPTED, UNKNOWN - fall back to Beef
+          results.push(await this.getStatusFromBeef(txid));
+        }
+      } catch {
+        // Arcade 404 or error - fall back to Beef storage
+        // NOTE: If Arcade's scope is too limited (only knows txs it broadcast),
+        // consider using Beef storage as the primary source instead.
+        results.push(await this.getStatusFromBeef(txid));
+      }
+    }
+
+    return {
+      name: "1sat-api",
+      status: "success",
+      results,
+    };
   }
 
-  async isUtxo(_output: TableOutput): Promise<boolean> {
-    throw new Error("isUtxo not yet implemented");
+  /**
+   * Helper to get tx status from Beef storage (fallback when Arcade doesn't know the tx)
+   */
+  private async getStatusFromBeef(txid: string): Promise<StatusForTxidResult> {
+    try {
+      const beefBytes = await this.beef.getBeef(txid);
+      const tx = Transaction.fromBEEF(Array.from(beefBytes));
+
+      if (tx.merklePath) {
+        // Has a valid merkle path = mined
+        const currentHeight = await this.getHeight();
+        const depth = currentHeight - tx.merklePath.blockHeight + 1;
+        return { txid, status: "mined", depth };
+      } else {
+        // No merkle path = known but not yet mined
+        return { txid, status: "known", depth: 0 };
+      }
+    } catch {
+      // 404 or error from Beef = unknown
+      return { txid, status: "unknown", depth: undefined };
+    }
+  }
+
+  async isUtxo(output: TableOutput): Promise<boolean> {
+    const outpoint = `${output.txid}_${output.vout}`;
+    const spendTxid = await this.txo.getSpend(outpoint);
+    return spendTxid === null;
   }
 
   async getUtxoStatus(
     _output: string,
     _outputFormat?: GetUtxoStatusOutputFormat,
-    _outpoint?: string,
+    outpoint?: string,
     _useNext?: boolean,
   ): Promise<GetUtxoStatusResult> {
-    throw new Error("getUtxoStatus not yet implemented");
+    // We ignore _output (script hash) since we look up directly by outpoint
+    if (!outpoint) {
+      return {
+        name: "1sat-api",
+        status: "error",
+        error: new ServiceError(
+          "INVALID_PARAMETER",
+          "outpoint is required for getUtxoStatus",
+        ) as unknown as toolboxSdk.WalletError,
+        details: [],
+      };
+    }
+
+    try {
+      const txo = await this.txo.get(outpoint, {
+        sats: true,
+        spend: true,
+        block: true,
+      });
+
+      const isUtxo = !txo.spend;
+      const [txid, voutStr] = txo.outpoint.split("_");
+      const vout = parseInt(voutStr, 10);
+
+      return {
+        name: "1sat-api",
+        status: "success",
+        isUtxo,
+        details: isUtxo
+          ? [
+              {
+                txid,
+                index: vout,
+                satoshis: txo.satoshis,
+                height: txo.blockHeight,
+              },
+            ]
+          : [],
+      };
+    } catch {
+      // TXO not found - treat as not a UTXO
+      return {
+        name: "1sat-api",
+        status: "success",
+        isUtxo: false,
+        details: [],
+      };
+    }
   }
 
   async getScriptHashHistory(
-    _hash: string,
-    _useNext?: boolean,
+    hash: string,
+    useNext?: boolean,
   ): Promise<GetScriptHashHistoryResult> {
-    throw new Error("getScriptHashHistory not yet implemented");
+    if (!this.fallbackServices) {
+      throw new Error("getScriptHashHistory not implemented");
+    }
+    return this.fallbackServices.getScriptHashHistory(hash, useNext);
   }
 
-  async hashToHeader(_hash: string): Promise<BlockHeader> {
-    throw new Error("hashToHeader not yet implemented");
+  async hashToHeader(hash: string): Promise<BlockHeader> {
+    const header = await this.chaintracks.findHeaderForBlockHash(hash);
+    if (!header) {
+      throw new Error(`Block header not found for hash: ${hash}`);
+    }
+    return header;
   }
 
   async nLockTimeIsFinal(
-    _txOrLockTime: string | number[] | Transaction | number,
+    txOrLockTime: string | number[] | Transaction | number,
   ): Promise<boolean> {
-    throw new Error("nLockTimeIsFinal not yet implemented");
+    const MAXINT = 0xffffffff;
+    const BLOCK_LIMIT = 500000000;
+
+    let nLockTime: number;
+
+    if (typeof txOrLockTime === "number") {
+      nLockTime = txOrLockTime;
+    } else {
+      let tx: Transaction;
+      if (typeof txOrLockTime === "string") {
+        tx = Transaction.fromHex(txOrLockTime);
+      } else if (Array.isArray(txOrLockTime)) {
+        tx = Transaction.fromBinary(txOrLockTime);
+      } else {
+        tx = txOrLockTime;
+      }
+
+      // If all inputs have max sequence, the transaction is final regardless of lockTime
+      if (tx.inputs.every((i) => i.sequence === MAXINT)) {
+        return true;
+      }
+      nLockTime = tx.lockTime;
+    }
+
+    // If lockTime >= BLOCK_LIMIT, it's a timestamp (seconds since epoch)
+    if (nLockTime >= BLOCK_LIMIT) {
+      const currentTime = Math.floor(Date.now() / 1000);
+      return nLockTime < currentTime;
+    }
+
+    // Otherwise, it's a block height
+    const height = await this.getHeight();
+    return nLockTime < height;
   }
 }

@@ -28,6 +28,7 @@ export class CosignIndexer extends Indexer {
       data: decoded as CosignData,
       tags: [],
       owner: decoded.address,
+      protocol: "basket insertion", // Cosign script requires cosigner signature
     };
   }
 }

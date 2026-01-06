@@ -61,6 +61,13 @@ export interface IndexSummary {
 }
 
 /**
+ * Internalization protocol for synced outputs.
+ * - "wallet payment": P2PKH-based outputs that can be auto-signed
+ * - "basket insertion": Custom script outputs requiring manual unlock scripts
+ */
+export type InternalizeProtocol = "wallet payment" | "basket insertion";
+
+/**
  * Result from Indexer.parse() method
  */
 export interface ParseResult {
@@ -70,6 +77,12 @@ export interface ParseResult {
   basket?: string;
   /** Optional text content (e.g., from text inscriptions). Truncated to 1000 chars when stored. */
   content?: string;
+  /**
+   * Internalization protocol for this output.
+   * - "wallet payment": P2PKH outputs that can be auto-signed (default)
+   * - "basket insertion": Custom script outputs requiring manual unlock
+   */
+  protocol?: InternalizeProtocol;
 }
 
 /**
@@ -80,6 +93,12 @@ export interface Txo {
   outpoint: Outpoint;
   owner?: string;
   basket?: string;
+  /**
+   * Internalization protocol for this output.
+   * Set by the first indexer to claim ownership.
+   * Defaults to "wallet payment" if not set.
+   */
+  protocol?: InternalizeProtocol;
   data: { [tag: string]: IndexData };
 }
 

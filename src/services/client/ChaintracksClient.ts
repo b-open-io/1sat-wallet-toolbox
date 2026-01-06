@@ -1,5 +1,6 @@
 import type { ChainTracker } from "@bsv/sdk";
-import type { BlockHeader, ClientOptions } from "../types";
+import type { BaseBlockHeader, BlockHeader, Chain } from "@bsv/wallet-toolbox";
+import type { ClientOptions } from "../types";
 import { BaseClient } from "./BaseClient";
 
 /**
@@ -51,24 +52,32 @@ async function parseHeader(
   height: number,
 ): Promise<BlockHeader> {
   const version = readUint32LE(data, 0);
-  const prevHash = toHexLE(data.slice(4, 36));
+  const previousHash = toHexLE(data.slice(4, 36));
   const merkleRoot = toHexLE(data.slice(36, 68));
   const time = readUint32LE(data, 68);
   const bits = readUint32LE(data, 72);
   const nonce = readUint32LE(data, 76);
   const hash = toHexLE(await doubleSha256(data));
 
-  return { height, hash, version, prevHash, merkleRoot, time, bits, nonce };
+  return { height, hash, version, previousHash, merkleRoot, time, bits, nonce };
+}
+
+/**
+ * Convert bytes to hex string (big-endian / natural order)
+ */
+function toHex(data: Uint8Array): string {
+  return Array.from(data)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
  * Client for /1sat/chaintracks/* routes.
- * Provides block header data and implements ChainTracker interface.
+ * Implements ChaintracksClientApi interface from @bsv/wallet-toolbox.
  *
  * Routes:
  * - GET /tip - Get chain tip
  * - GET /tip/stream - SSE stream of new blocks
- * - GET /height - Get current height
  * - GET /network - Get network type
  * - GET /headers?height=N&count=M - Get raw header bytes
  * - GET /header/height/:height - Get header by height
@@ -78,6 +87,11 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
   private eventSource: EventSource | null = null;
   private subscribers: Set<(header: BlockHeader) => void> = new Set();
 
+  // Chain tip cache (30 second TTL)
+  private cachedTip: BlockHeader | null = null;
+  private cachedTipTime = 0;
+  private static readonly TIP_CACHE_TTL_MS = 30_000;
+
   constructor(baseUrl: string, options: ClientOptions = {}) {
     super(`${baseUrl}/1sat/chaintracks`, options);
   }
@@ -86,7 +100,7 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
    * Get current blockchain height (ChainTracker interface)
    */
   async currentHeight(): Promise<number> {
-    const tip = await this.getTip();
+    const tip = await this.findChainTipHeader();
     return tip.height;
   }
 
@@ -95,9 +109,8 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
    */
   async isValidRootForHeight(root: string, height: number): Promise<boolean> {
     try {
-      const header = await this.getHeaderByHeight(height);
-      const isValid = header.merkleRoot === root;
-      return isValid;
+      const header = await this.findHeaderForHeight(height);
+      return header?.merkleRoot === root;
     } catch (e) {
       console.error(`isValidRootForHeight(${height}) failed:`, e);
       return false;
@@ -105,52 +118,162 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
   }
 
   /**
-   * Get the network type (main or test)
+   * Get the blockchain network (main or test)
    */
-  async getNetwork(): Promise<string> {
-    const data = await this.request<{ network: string }>("/network");
+  async getChain(): Promise<Chain> {
+    const data = await this.request<{ network: Chain }>("/network");
     return data.network;
   }
 
   /**
-   * Get the current chain tip
+   * Get service info - synthetic for remote client
    */
-  async getTip(): Promise<BlockHeader> {
-    return this.request<BlockHeader>("/tip");
+  async getInfo(): Promise<{
+    chain: Chain;
+    heightBulk: number;
+    heightLive: number;
+    storage: string;
+    bulkIngestors: string[];
+    liveIngestors: string[];
+    packages: { name: string; version: string }[];
+  }> {
+    const tip = await this.findChainTipHeader();
+    const chain = await this.getChain();
+    return {
+      chain,
+      heightBulk: tip.height,
+      heightLive: tip.height,
+      storage: "remote",
+      bulkIngestors: [],
+      liveIngestors: [],
+      packages: [],
+    };
+  }
+
+  /**
+   * Get current chain height
+   */
+  async getPresentHeight(): Promise<number> {
+    return this.currentHeight();
+  }
+
+  /**
+   * Get headers as serialized 80-byte hex string
+   */
+  async getHeaders(height: number, count: number): Promise<string> {
+    const data = await this.requestBinary(
+      `/headers?height=${height}&count=${count}`,
+    );
+    return toHex(data);
+  }
+
+  /**
+   * Get the current chain tip header (cached for 30 seconds)
+   */
+  async findChainTipHeader(): Promise<BlockHeader> {
+    const now = Date.now();
+    if (this.cachedTip && now - this.cachedTipTime < ChaintracksClient.TIP_CACHE_TTL_MS) {
+      return this.cachedTip;
+    }
+
+    const header = await this.request<BlockHeader>("/tip");
+    console.log("[ChaintracksClient] findChainTipHeader:", header.height, header.hash);
+    this.cachedTip = header;
+    this.cachedTipTime = now;
+    return header;
+  }
+
+  /**
+   * Get the current chain tip hash
+   */
+  async findChainTipHash(): Promise<string> {
+    const tip = await this.findChainTipHeader();
+    return tip.hash;
   }
 
   /**
    * Get block header by height
    */
-  async getHeaderByHeight(height: number): Promise<BlockHeader> {
-    return this.request<BlockHeader>(`/header/height/${height}`);
+  async findHeaderForHeight(height: number): Promise<BlockHeader | undefined> {
+    try {
+      return await this.request<BlockHeader>(`/header/height/${height}`);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
    * Get block header by hash
    */
-  async getHeaderByHash(hash: string): Promise<BlockHeader> {
-    return this.request<BlockHeader>(`/header/hash/${hash}`);
+  async findHeaderForBlockHash(hash: string): Promise<BlockHeader | undefined> {
+    try {
+      return await this.request<BlockHeader>(`/header/hash/${hash}`);
+    } catch {
+      return undefined;
+    }
   }
 
-  /**
-   * Get multiple headers as parsed BlockHeader objects
-   */
-  async getHeaders(height: number, count: number): Promise<BlockHeader[]> {
-    const data = await this.requestBinary(
-      `/headers?height=${height}&count=${count}`,
-    );
+  /** No-op: Remote server tracks the chain */
+  async addHeader(_header: BaseBlockHeader): Promise<void> {}
 
-    if (data.length % 80 !== 0) {
-      throw new Error(`Invalid response length: ${data.length} bytes`);
+  /** No-op: Client is always ready */
+  async startListening(): Promise<void> {}
+
+  /** No-op: Resolves immediately */
+  async listening(): Promise<void> {}
+
+  /** Always true for remote client */
+  async isListening(): Promise<boolean> {
+    return true;
+  }
+
+  /** Always true for remote client */
+  async isSynchronized(): Promise<boolean> {
+    return true;
+  }
+
+  /** Not implemented for remote client */
+  async subscribeReorgs(
+    _listener: (
+      depth: number,
+      oldTip: BlockHeader,
+      newTip: BlockHeader,
+      deactivatedHeaders?: BlockHeader[],
+    ) => void,
+  ): Promise<string> {
+    throw new Error("Method not implemented.");
+  }
+
+  /** Unsubscribe from events */
+  async unsubscribe(_subscriptionId: string): Promise<boolean> {
+    return false;
+  }
+
+  /** Subscribe to new header events */
+  async subscribeHeaders(
+    listener: (header: BlockHeader) => void,
+  ): Promise<string> {
+    this.subscribers.add(listener);
+
+    if (!this.eventSource) {
+      this.eventSource = new EventSource(`${this.baseUrl}/tip/stream`);
+      this.eventSource.onmessage = (event) => {
+        try {
+          const header = JSON.parse(event.data) as BlockHeader;
+          for (const cb of this.subscribers) {
+            cb(header);
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+      this.eventSource.onerror = () => {
+        this.eventSource?.close();
+        this.eventSource = null;
+      };
     }
 
-    const headers: BlockHeader[] = [];
-    for (let i = 0; i < data.length; i += 80) {
-      headers.push(await parseHeader(data.slice(i, i + 80), height + i / 80));
-    }
-
-    return headers;
+    return "subscription";
   }
 
   /**

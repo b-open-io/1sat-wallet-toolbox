@@ -4,12 +4,10 @@ if (typeof globalThis.Buffer === "undefined") {
   (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 }
 
-export {
-  OneSatWallet,
-  type OneSatWalletArgs,
-  type OneSatWalletEvents,
-  type IngestResult,
-} from "./OneSatWallet";
+// API Layer - The new unified API for 1sat ecosystem
+export * from "./api";
+
+// Services
 export { OneSatServices, type SyncOutput } from "./services/OneSatServices";
 export type {
   OrdfsMetadata,
@@ -26,3 +24,6 @@ export * from "./indexers";
 
 // Sync Queue
 export * from "./sync";
+
+// CWI (Chrome Wallet Interface) - BRC-100 implementations
+export * from "./cwi";

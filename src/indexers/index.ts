@@ -2,6 +2,7 @@ export {
   Indexer,
   type IndexData,
   type IndexSummary,
+  type InternalizeProtocol,
   type ParseContext,
   type ParseResult,
   type Txo,

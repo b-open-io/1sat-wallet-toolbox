@@ -71,7 +71,7 @@ export class OriginIndexer extends Indexer {
     return {
       data: origin,
       tags: [], // Tags will be added in summarize() once origin is determined
-      owner: address && this.owners.has(address) ? address : undefined,
+      owner: address,
       basket: "1sat",
     };
   }
