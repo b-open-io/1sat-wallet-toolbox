@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2026-01-08
+
+### Added
+
+- **OrdLock purchase/cancel** - Implemented OrdLock purchase and cancel operations for BRC-100 marketplace integration
+- **Lock unlock** - Added Lock unlock functionality for time-locked outputs
+
+### Changed
+
+- **Updated dependencies** - Switched to npm packages for template dependencies
+
 ## [0.0.8] - 2025-12-28
 
 ### Changed
