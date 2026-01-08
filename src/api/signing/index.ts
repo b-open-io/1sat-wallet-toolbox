@@ -1,7 +1,7 @@
 /**
  * Signing Module
  *
- * Functions for message signing and transaction signatures.
+ * Functions for message signing.
  */
 
 import {
@@ -34,31 +34,6 @@ export interface SignedMessage {
   message: string;
   sig: string;
   derivationTag?: SignMessageRequest["tag"];
-}
-
-export interface SignatureRequest {
-  prevTxid: string;
-  outputIndex: number;
-  inputIndex: number;
-  satoshis: number;
-  script?: string;
-  sigHashType?: number;
-  csIdx?: number;
-  address: string | string[];
-}
-
-export interface GetSignaturesRequest {
-  rawtx: string;
-  sigRequests: SignatureRequest[];
-  format?: "tx" | "beef" | "ef";
-}
-
-export interface SignatureResponse {
-  sig: string;
-  pubKey: string;
-  inputIndex: number;
-  sigHashType: number;
-  csIdx?: number;
 }
 
 /**
@@ -100,15 +75,4 @@ export async function signMessage(
   } catch (error) {
     return { error: error instanceof Error ? error.message : "unknown-error" };
   }
-}
-
-/**
- * Get signatures for transaction inputs.
- * TODO: Implement signature generation
- */
-export async function getSignatures(
-  _cwi: WalletInterface,
-  _request: GetSignaturesRequest
-): Promise<{ sigResponses?: SignatureResponse[]; error?: { message: string } }> {
-  return { error: { message: "not-implemented" } };
 }

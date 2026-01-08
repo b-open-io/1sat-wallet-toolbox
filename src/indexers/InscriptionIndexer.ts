@@ -57,11 +57,10 @@ export class InscriptionIndexer extends Indexer {
     let owner = parseAddress(script, 0, this.network);
     if (!owner && decoded.scriptSuffix) {
       // Try to find owner in suffix (after OP_ENDIF)
-      const suffixScript = Script.fromBinary(Array.from(decoded.scriptSuffix));
-      owner = parseAddress(suffixScript, 0, this.network);
+      owner = parseAddress(decoded.scriptSuffix, 0, this.network);
       // Also check for OP_CODESEPARATOR pattern
-      if (!owner && suffixScript.chunks[0]?.op === OP.OP_CODESEPARATOR) {
-        owner = parseAddress(suffixScript, 1, this.network);
+      if (!owner && decoded.scriptSuffix.chunks[0]?.op === OP.OP_CODESEPARATOR) {
+        owner = parseAddress(decoded.scriptSuffix, 1, this.network);
       }
     }
 

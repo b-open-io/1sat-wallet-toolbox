@@ -5,24 +5,27 @@
  */
 
 import {
-  P2PKH,
+  Hash,
+  PublicKey,
   Script,
+  Transaction,
+  TransactionSignature,
   Utils,
   type WalletInterface,
   type WalletOutput,
-  type CreateActionArgs,
   type CreateActionOutput,
 } from "@bsv/sdk";
 import { LOCK_BASKET, LOCK_PREFIX, LOCK_SUFFIX, MIN_UNLOCK_SATS } from "../constants";
 import { getChainInfo } from "../balance";
+
+// Hardcoded keyID for all locks - deterministic derivation
+const LOCK_KEY_ID = "lock";
 
 export interface LockBsvRequest {
   /** Amount in satoshis to lock */
   satoshis: number;
   /** Block height until which to lock */
   until: number;
-  /** Address to lock to (required - use a derived address for unlocking) */
-  lockAddress: string;
 }
 
 export interface LockData {
@@ -105,48 +108,46 @@ export async function getLockData(
 }
 
 /**
- * Build CreateActionArgs for locking BSV until a block height.
- * Does NOT execute - returns params for createAction.
- */
-export function buildLockBsv(requests: LockBsvRequest[]): CreateActionArgs | { error: string } {
-  if (!requests || requests.length === 0) {
-    return { error: "no-lock-requests" };
-  }
-
-  const outputs: CreateActionOutput[] = [];
-  for (const req of requests) {
-    if (req.satoshis <= 0) return { error: "invalid-satoshis" };
-    if (req.until <= 0) return { error: "invalid-block-height" };
-    if (!req.lockAddress) return { error: "missing-lock-address" };
-
-    const lockingScript = buildLockScript(req.lockAddress, req.until);
-    outputs.push({
-      lockingScript: lockingScript.toHex(),
-      satoshis: req.satoshis,
-      outputDescription: `Lock ${req.satoshis} sats until block ${req.until}`,
-    });
-  }
-
-  return {
-    description: `Lock BSV in ${requests.length} output(s)`,
-    outputs,
-  };
-}
-
-/**
  * Lock BSV until a block height.
+ * Derives lock address using hardcoded keyID.
  */
 export async function lockBsv(
   cwi: WalletInterface,
   requests: LockBsvRequest[]
 ): Promise<LockOperationResponse> {
   try {
-    const params = buildLockBsv(requests);
-    if ("error" in params) {
-      return params;
+    if (!requests || requests.length === 0) {
+      return { error: "no-lock-requests" };
     }
 
-    const result = await cwi.createAction(params);
+    // Derive lock address once (same for all locks)
+    const { publicKey } = await cwi.getPublicKey({
+      protocolID: [1, "lock"],
+      keyID: LOCK_KEY_ID,
+      counterparty: "self",
+      forSelf: true,
+    });
+    const lockAddress = PublicKey.fromString(publicKey).toAddress();
+
+    const outputs: CreateActionOutput[] = [];
+    for (const req of requests) {
+      if (req.satoshis <= 0) return { error: "invalid-satoshis" };
+      if (req.until <= 0) return { error: "invalid-block-height" };
+
+      const lockingScript = buildLockScript(lockAddress, req.until);
+      outputs.push({
+        lockingScript: lockingScript.toHex(),
+        satoshis: req.satoshis,
+        outputDescription: `Lock ${req.satoshis} sats until block ${req.until}`,
+        basket: LOCK_BASKET,
+        tags: [`lock:until:${req.until}`],
+      });
+    }
+
+    const result = await cwi.createAction({
+      description: `Lock BSV in ${requests.length} output(s)`,
+      outputs,
+    });
 
     if (!result.txid) {
       return { error: "no-txid-returned" };
@@ -159,8 +160,159 @@ export async function lockBsv(
 
 /**
  * Unlock matured BSV locks.
- * TODO: Requires direct key access - not possible through CWI alone
+ * Uses createSignature with stored keyID to sign unlock transactions.
  */
-export async function unlockBsv(_cwi: WalletInterface): Promise<LockOperationResponse> {
-  return { error: "requires-direct-key-access" };
+export async function unlockBsv(
+  cwi: WalletInterface,
+  chain: "main" | "test" = "main",
+  wocApiKey?: string
+): Promise<LockOperationResponse> {
+  try {
+    // Get current block height
+    const chainInfo = await getChainInfo(chain, wocApiKey);
+    const currentHeight = chainInfo?.blocks || 0;
+    if (currentHeight === 0) {
+      return { error: "could-not-get-block-height" };
+    }
+
+    // Get lock outputs from basket
+    const result = await cwi.listOutputs({
+      basket: LOCK_BASKET,
+      includeTags: true,
+      include: "locking scripts",
+      limit: 10000,
+    });
+
+    // Filter for matured locks
+    const maturedLocks: Array<{
+      output: WalletOutput;
+      until: number;
+    }> = [];
+
+    for (const o of result.outputs) {
+      const untilTag = o.tags?.find((t) => t.startsWith("lock:until:"));
+      if (!untilTag) continue;
+
+      const until = parseInt(untilTag.slice(11), 10);
+
+      if (until <= currentHeight) {
+        maturedLocks.push({ output: o, until });
+      }
+    }
+
+    if (maturedLocks.length === 0) {
+      return { error: "no-matured-locks" };
+    }
+
+    // Check minimum unlock amount
+    const totalSats = maturedLocks.reduce((sum, l) => sum + l.output.satoshis, 0);
+    if (totalSats < MIN_UNLOCK_SATS * maturedLocks.length) {
+      return { error: "insufficient-unlock-amount" };
+    }
+
+    // Find max until value for lockTime
+    const maxUntil = Math.max(...maturedLocks.map((l) => l.until));
+
+    // Build createAction args
+    const createResult = await cwi.createAction({
+      description: `Unlock ${maturedLocks.length} lock(s)`,
+      inputs: maturedLocks.map((l) => ({
+        outpoint: l.output.outpoint,
+        inputDescription: "Locked BSV",
+        unlockingScriptLength: 180, // sig + pubkey + preimage estimate
+        sequenceNumber: 0, // Must be < 0xffffffff for nLockTime
+      })),
+      outputs: [
+        {
+          lockingScript: "", // Will be filled by wallet as change
+          satoshis: 0, // Will be calculated by wallet
+          outputDescription: "Unlocked BSV",
+        },
+      ],
+      lockTime: maxUntil,
+      options: { signAndProcess: false },
+    });
+
+    if ("error" in createResult && createResult.error) {
+      return { error: String(createResult.error) };
+    }
+
+    if (!createResult.signableTransaction) {
+      return { error: "no-signable-transaction" };
+    }
+
+    // Parse transaction from BEEF
+    const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+
+    // Build unlocking scripts for each input
+    const spends: Record<number, { unlockingScript: string }> = {};
+
+    for (let i = 0; i < maturedLocks.length; i++) {
+      const lock = maturedLocks[i];
+      const input = tx.inputs[i];
+      const lockingScript = Script.fromHex(lock.output.lockingScript!);
+
+      // Build preimage for signature
+      const preimage = TransactionSignature.format({
+        sourceTXID: input.sourceTXID!,
+        sourceOutputIndex: input.sourceOutputIndex,
+        sourceSatoshis: lock.output.satoshis,
+        transactionVersion: tx.version,
+        otherInputs: tx.inputs.filter((_, idx) => idx !== i),
+        outputs: tx.outputs,
+        inputIndex: i,
+        subscript: lockingScript,
+        inputSequence: 0,
+        lockTime: tx.lockTime,
+        scope:
+          TransactionSignature.SIGHASH_ALL |
+          TransactionSignature.SIGHASH_ANYONECANPAY |
+          TransactionSignature.SIGHASH_FORKID,
+      });
+
+      // Hash preimage for signing
+      const sighash = Hash.sha256(Hash.sha256(preimage));
+
+      // Get signature via createSignature using hardcoded keyID
+      const { signature } = await cwi.createSignature({
+        protocolID: [1, "lock"],
+        keyID: LOCK_KEY_ID,
+        counterparty: "self",
+        hashToDirectlySign: Array.from(sighash),
+      });
+
+      // Get public key
+      const { publicKey } = await cwi.getPublicKey({
+        protocolID: [1, "lock"],
+        keyID: LOCK_KEY_ID,
+        counterparty: "self",
+        forSelf: true,
+      });
+
+      // Build unlocking script: <sig> <pubkey> <preimage>
+      const unlockingScript = new Script()
+        .writeBin(signature)
+        .writeBin(Utils.toArray(publicKey, "hex"))
+        .writeBin(Array.from(preimage));
+
+      spends[i] = { unlockingScript: unlockingScript.toHex() };
+    }
+
+    // Sign and broadcast
+    const signResult = await cwi.signAction({
+      reference: createResult.signableTransaction.reference,
+      spends,
+    });
+
+    if ("error" in signResult) {
+      return { error: String(signResult.error) };
+    }
+
+    return {
+      txid: signResult.txid,
+      rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "unknown-error" };
+  }
 }

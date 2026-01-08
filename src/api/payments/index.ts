@@ -9,7 +9,6 @@ import {
   Script,
   Utils,
   type WalletInterface,
-  type CreateActionArgs,
   type CreateActionOutput,
 } from "@bsv/sdk";
 import { Inscription } from "@bopen-io/templates";
@@ -63,104 +62,6 @@ function buildInscriptionScript(address: string, base64Data: string, mimeType: s
 }
 
 /**
- * Build CreateActionArgs for sending BSV payments.
- * Does NOT execute - returns params for createAction.
- */
-export function buildSendBsv(requests: SendBsvRequest[]): CreateActionArgs | { error: string } {
-  if (!requests || requests.length === 0) {
-    return { error: "no-requests" };
-  }
-
-  const outputs: CreateActionOutput[] = [];
-  for (const req of requests) {
-    let lockingScript: Script;
-
-    if (req.script) {
-      lockingScript = Script.fromHex(req.script);
-    } else if (req.address) {
-      if (req.inscription) {
-        lockingScript = buildInscriptionScript(req.address, req.inscription.base64Data, req.inscription.mimeType);
-      } else {
-        lockingScript = new P2PKH().lock(req.address);
-      }
-    } else if (req.data && req.data.length > 0) {
-      try {
-        lockingScript = Script.fromASM(`OP_0 OP_RETURN ${req.data.join(" ")}`);
-      } catch {
-        return { error: "invalid-data" };
-      }
-    } else if (req.paymail) {
-      return { error: "paymail-not-yet-implemented" };
-    } else {
-      return { error: "invalid-request" };
-    }
-
-    outputs.push({
-      lockingScript: lockingScript.toHex(),
-      satoshis: req.satoshis,
-      outputDescription: `Payment of ${req.satoshis} sats`,
-    });
-  }
-
-  return {
-    description: `Send ${requests.length} payment(s)`,
-    outputs,
-    options: {
-      signAndProcess: true,
-    },
-  };
-}
-
-/**
- * Build CreateActionArgs for sending all BSV to a destination.
- * Does NOT execute - returns params for createAction.
- */
-export async function buildSendAllBsv(
-  cwi: WalletInterface,
-  destination: string
-): Promise<CreateActionArgs | { error: string }> {
-  if (isPaymail(destination)) {
-    return { error: "paymail-not-yet-implemented" };
-  }
-
-  const result = await cwi.listOutputs({
-    basket: FUNDING_BASKET,
-    include: "locking scripts",
-    limit: 10000,
-  });
-
-  if (!result.outputs || result.outputs.length === 0) {
-    return { error: "no-funds" };
-  }
-
-  const totalSats = result.outputs.reduce((sum, o) => sum + o.satoshis, 0);
-  const estimatedFee = Math.ceil((result.outputs.length * 150 + 44) * 1);
-  const sendAmount = totalSats - estimatedFee;
-
-  if (sendAmount <= 0) {
-    return { error: "insufficient-funds-for-fee" };
-  }
-
-  const inputs = result.outputs.map((o) => ({
-    outpoint: o.outpoint,
-    inputDescription: "Sweep funds",
-  }));
-
-  return {
-    description: "Send all BSV",
-    inputs,
-    outputs: [{
-      lockingScript: new P2PKH().lock(destination).toHex(),
-      satoshis: sendAmount,
-      outputDescription: "Sweep all funds",
-    }],
-    options: {
-      signAndProcess: true,
-    },
-  };
-}
-
-/**
  * Send BSV to one or more destinations.
  */
 export async function sendBsv(
@@ -168,12 +69,46 @@ export async function sendBsv(
   requests: SendBsvRequest[]
 ): Promise<SendBsvResponse> {
   try {
-    const params = buildSendBsv(requests);
-    if ("error" in params) {
-      return params;
+    if (!requests || requests.length === 0) {
+      return { error: "no-requests" };
     }
 
-    const result = await cwi.createAction(params);
+    const outputs: CreateActionOutput[] = [];
+    for (const req of requests) {
+      let lockingScript: Script;
+
+      if (req.script) {
+        lockingScript = Script.fromHex(req.script);
+      } else if (req.address) {
+        if (req.inscription) {
+          lockingScript = buildInscriptionScript(req.address, req.inscription.base64Data, req.inscription.mimeType);
+        } else {
+          lockingScript = new P2PKH().lock(req.address);
+        }
+      } else if (req.data && req.data.length > 0) {
+        try {
+          lockingScript = Script.fromASM(`OP_0 OP_RETURN ${req.data.join(" ")}`);
+        } catch {
+          return { error: "invalid-data" };
+        }
+      } else if (req.paymail) {
+        return { error: "paymail-not-yet-implemented" };
+      } else {
+        return { error: "invalid-request" };
+      }
+
+      outputs.push({
+        lockingScript: lockingScript.toHex(),
+        satoshis: req.satoshis,
+        outputDescription: `Payment of ${req.satoshis} sats`,
+      });
+    }
+
+    const result = await cwi.createAction({
+      description: `Send ${requests.length} payment(s)`,
+      outputs,
+      options: { signAndProcess: true },
+    });
 
     if (!result.txid) {
       return { error: "no-txid-returned" };
@@ -192,12 +127,43 @@ export async function sendAllBsv(
   destination: string
 ): Promise<SendBsvResponse> {
   try {
-    const params = await buildSendAllBsv(cwi, destination);
-    if ("error" in params) {
-      return params;
+    if (isPaymail(destination)) {
+      return { error: "paymail-not-yet-implemented" };
     }
 
-    const result = await cwi.createAction(params);
+    const listResult = await cwi.listOutputs({
+      basket: FUNDING_BASKET,
+      include: "locking scripts",
+      limit: 10000,
+    });
+
+    if (!listResult.outputs || listResult.outputs.length === 0) {
+      return { error: "no-funds" };
+    }
+
+    const totalSats = listResult.outputs.reduce((sum, o) => sum + o.satoshis, 0);
+    const estimatedFee = Math.ceil((listResult.outputs.length * 150 + 44) * 1);
+    const sendAmount = totalSats - estimatedFee;
+
+    if (sendAmount <= 0) {
+      return { error: "insufficient-funds-for-fee" };
+    }
+
+    const inputs = listResult.outputs.map((o) => ({
+      outpoint: o.outpoint,
+      inputDescription: "Sweep funds",
+    }));
+
+    const result = await cwi.createAction({
+      description: "Send all BSV",
+      inputs,
+      outputs: [{
+        lockingScript: new P2PKH().lock(destination).toHex(),
+        satoshis: sendAmount,
+        outputDescription: "Sweep all funds",
+      }],
+      options: { signAndProcess: true },
+    });
 
     if (!result.txid) {
       return { error: "no-txid-returned" };

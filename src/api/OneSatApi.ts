@@ -18,7 +18,8 @@
  * ```
  */
 
-import type { WalletInterface, WalletOutput, CreateActionArgs, ListOutputsArgs } from "@bsv/sdk";
+import type { WalletInterface, WalletOutput, ListOutputsArgs } from "@bsv/sdk";
+import type { OneSatServices } from "../services/OneSatServices";
 
 // Import from modules
 import * as balance from "./balance";
@@ -43,21 +44,19 @@ export type {
   PurchaseOrdinalRequest,
   OrdinalOperationResponse,
 } from "./ordinals";
-export type { Bsv21Balance, SendBsv21Request, TokenOperationResponse } from "./tokens";
+export type { Bsv21Balance, SendBsv21Request, PurchaseBsv21Request, TokenOperationResponse } from "./tokens";
 export type { InscribeRequest, InscribeResponse } from "./inscriptions";
 export type { LockBsvRequest, LockData, LockOperationResponse } from "./locks";
 export type {
   SignMessageRequest,
   SignedMessage,
-  SignatureRequest,
-  GetSignaturesRequest,
-  SignatureResponse,
 } from "./signing";
 export type { BroadcastRequest, BroadcastResponse } from "./broadcast";
 
 export class OneSatApi {
   constructor(
     private cwi: WalletInterface,
+    private services?: OneSatServices,
     private chain: "main" | "test" = "main",
     private wocApiKey?: string
   ) {}
@@ -77,14 +76,6 @@ export class OneSatApi {
   }
 
   // ============ Payments ============
-
-  buildSendBsv(requests: payments.SendBsvRequest[]): CreateActionArgs | { error: string } {
-    return payments.buildSendBsv(requests);
-  }
-
-  buildSendAllBsv(destination: string) {
-    return payments.buildSendAllBsv(this.cwi, destination);
-  }
 
   sendBsv(requests: payments.SendBsvRequest[]) {
     return payments.sendBsv(this.cwi, requests);
@@ -125,7 +116,7 @@ export class OneSatApi {
   }
 
   purchaseOrdinal(request: ordinals.PurchaseOrdinalRequest) {
-    return ordinals.purchaseOrdinal(this.cwi, request);
+    return ordinals.purchaseOrdinal(this.cwi, request, this.services);
   }
 
   /**
@@ -151,18 +142,14 @@ export class OneSatApi {
   }
 
   sendBsv21(request: tokens.SendBsv21Request) {
-    return tokens.sendBsv21(this.cwi, request);
+    return tokens.sendBsv21(this.cwi, request, this.services);
   }
 
-  purchaseBsv21(outpoint: string) {
-    return tokens.purchaseBsv21(this.cwi, outpoint);
+  purchaseBsv21(request: tokens.PurchaseBsv21Request) {
+    return tokens.purchaseBsv21(this.cwi, request, this.services);
   }
 
   // ============ Inscriptions ============
-
-  buildInscribe(request: inscriptions.InscribeRequest): CreateActionArgs | { error: string } {
-    return inscriptions.buildInscribe(request);
-  }
 
   inscribe(request: inscriptions.InscribeRequest) {
     return inscriptions.inscribe(this.cwi, request);
@@ -182,26 +169,18 @@ export class OneSatApi {
     return locks.getLockData(this.cwi, this.chain, this.wocApiKey);
   }
 
-  buildLockBsv(requests: locks.LockBsvRequest[]): CreateActionArgs | { error: string } {
-    return locks.buildLockBsv(requests);
-  }
-
   lockBsv(requests: locks.LockBsvRequest[]) {
     return locks.lockBsv(this.cwi, requests);
   }
 
   unlockBsv() {
-    return locks.unlockBsv(this.cwi);
+    return locks.unlockBsv(this.cwi, this.chain, this.wocApiKey);
   }
 
   // ============ Signing ============
 
   signMessage(request: signing.SignMessageRequest) {
     return signing.signMessage(this.cwi, request);
-  }
-
-  getSignatures(request: signing.GetSignaturesRequest) {
-    return signing.getSignatures(this.cwi, request);
   }
 
   // ============ Broadcast ============

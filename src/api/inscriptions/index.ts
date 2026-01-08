@@ -9,7 +9,6 @@ import {
   Script,
   Utils,
   type WalletInterface,
-  type CreateActionArgs,
 } from "@bsv/sdk";
 import { Inscription } from "@bopen-io/templates";
 import { MAX_INSCRIPTION_BYTES } from "../constants";
@@ -47,28 +46,6 @@ function buildInscriptionScript(address: string, base64Data: string, mimeType: s
 }
 
 /**
- * Build CreateActionArgs for creating an inscription.
- * Does NOT execute - returns params for createAction.
- */
-export function buildInscribe(request: InscribeRequest): CreateActionArgs | { error: string } {
-  const decoded = Buffer.from(request.base64Data, "base64");
-  if (decoded.length > MAX_INSCRIPTION_BYTES) {
-    return { error: `Inscription data too large: ${decoded.length} bytes (max ${MAX_INSCRIPTION_BYTES})` };
-  }
-
-  const lockingScript = buildInscriptionScript(request.destination, request.base64Data, request.mimeType);
-
-  return {
-    description: "Create inscription",
-    outputs: [{
-      lockingScript: lockingScript.toHex(),
-      satoshis: 1,
-      outputDescription: "Inscription",
-    }],
-  };
-}
-
-/**
  * Create an inscription.
  */
 export async function inscribe(
@@ -76,12 +53,21 @@ export async function inscribe(
   request: InscribeRequest
 ): Promise<InscribeResponse> {
   try {
-    const params = buildInscribe(request);
-    if ("error" in params) {
-      return params;
+    const decoded = Buffer.from(request.base64Data, "base64");
+    if (decoded.length > MAX_INSCRIPTION_BYTES) {
+      return { error: `Inscription data too large: ${decoded.length} bytes (max ${MAX_INSCRIPTION_BYTES})` };
     }
 
-    const result = await cwi.createAction(params);
+    const lockingScript = buildInscriptionScript(request.destination, request.base64Data, request.mimeType);
+
+    const result = await cwi.createAction({
+      description: "Create inscription",
+      outputs: [{
+        lockingScript: lockingScript.toHex(),
+        satoshis: 1,
+        outputDescription: "Inscription",
+      }],
+    });
 
     if (!result.txid) {
       return { error: "no-txid-returned" };
