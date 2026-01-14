@@ -1,27 +1,31 @@
 /**
  * Inscriptions Module
  *
- * Functions for creating inscriptions.
+ * Skills for creating inscriptions.
  */
 
-import {
-  P2PKH,
-  Script,
-  Utils,
-  type WalletInterface,
-} from "@bsv/sdk";
+import { P2PKH, PublicKey, Script, Utils } from "@bsv/sdk";
 import { Inscription } from "@bopen-io/templates";
-import { MAX_INSCRIPTION_BYTES } from "../constants";
+import type { Skill } from "../skills/types";
+import { MAX_INSCRIPTION_BYTES, ORDINALS_BASKET } from "../constants";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const ORDINAL_PROTOCOL: [0 | 1 | 2, string] = [1, "ordinal"];
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface InscribeRequest {
-  /** Base64 encoded data */
-  base64Data: string;
-  /** MIME type of the content */
-  mimeType: string;
+  /** Base64 encoded content */
+  base64Content: string;
+  /** Content type (MIME type) */
+  contentType: string;
   /** Optional MAP metadata */
   map?: Record<string, string>;
-  /** Destination address for the inscription (required - use a derived address) */
-  destination: string;
 }
 
 export interface InscribeResponse {
@@ -30,12 +34,13 @@ export interface InscribeResponse {
   error?: string;
 }
 
-/**
- * Build an inscription locking script.
- */
-function buildInscriptionScript(address: string, base64Data: string, mimeType: string): Script {
-  const content = Utils.toArray(base64Data, "base64");
-  const inscription = Inscription.create(new Uint8Array(content), mimeType);
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+function buildInscriptionScript(address: string, base64Content: string, contentType: string): Script {
+  const content = Utils.toArray(base64Content, "base64");
+  const inscription = Inscription.create(new Uint8Array(content), contentType);
   const inscriptionScript = inscription.lock();
   const p2pkhScript = new P2PKH().lock(address);
 
@@ -45,35 +50,80 @@ function buildInscriptionScript(address: string, base64Data: string, mimeType: s
   return combined;
 }
 
+// ============================================================================
+// Skills
+// ============================================================================
+
 /**
  * Create an inscription.
  */
-export async function inscribe(
-  cwi: WalletInterface,
-  request: InscribeRequest
-): Promise<InscribeResponse> {
-  try {
-    const decoded = Buffer.from(request.base64Data, "base64");
-    if (decoded.length > MAX_INSCRIPTION_BYTES) {
-      return { error: `Inscription data too large: ${decoded.length} bytes (max ${MAX_INSCRIPTION_BYTES})` };
+export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
+  meta: {
+    name: "inscribe",
+    description: "Create a new inscription with the given content and type",
+    category: "inscriptions",
+    inputSchema: {
+      type: "object",
+      properties: {
+        base64Content: { type: "string", description: "Base64 encoded content" },
+        contentType: { type: "string", description: "Content type (MIME type)" },
+        map: {
+          type: "object",
+          description: "Optional MAP metadata",
+          properties: {},
+        },
+      },
+      required: ["base64Content", "contentType"],
+    },
+  },
+  async execute(ctx, input) {
+    try {
+      const decoded = Utils.toArray(input.base64Content, "base64");
+      if (decoded.length > MAX_INSCRIPTION_BYTES) {
+        return { error: `Inscription data too large: ${decoded.length} bytes (max ${MAX_INSCRIPTION_BYTES})` };
+      }
+
+      const keyID = Date.now().toString();
+      const { publicKey } = await ctx.wallet.getPublicKey({
+        protocolID: ORDINAL_PROTOCOL,
+        keyID,
+        counterparty: "self",
+        forSelf: true,
+      });
+      const address = PublicKey.fromString(publicKey).toAddress();
+
+      const lockingScript = buildInscriptionScript(address, input.base64Content, input.contentType);
+
+      const result = await ctx.wallet.createAction({
+        description: "Create inscription",
+        outputs: [
+          {
+            lockingScript: lockingScript.toHex(),
+            satoshis: 1,
+            outputDescription: "Inscription",
+            basket: ORDINALS_BASKET,
+            tags: [`type:${input.contentType}`],
+            customInstructions: JSON.stringify({
+              protocolID: ORDINAL_PROTOCOL,
+              keyID,
+            }),
+          },
+        ],
+      });
+
+      if (!result.txid) {
+        return { error: "no-txid-returned" };
+      }
+      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "unknown-error" };
     }
+  },
+};
 
-    const lockingScript = buildInscriptionScript(request.destination, request.base64Data, request.mimeType);
+// ============================================================================
+// Module exports
+// ============================================================================
 
-    const result = await cwi.createAction({
-      description: "Create inscription",
-      outputs: [{
-        lockingScript: lockingScript.toHex(),
-        satoshis: 1,
-        outputDescription: "Inscription",
-      }],
-    });
-
-    if (!result.txid) {
-      return { error: "no-txid-returned" };
-    }
-    return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "unknown-error" };
-  }
-}
+/** All inscription skills for registry */
+export const inscriptionsSkills = [inscribe];

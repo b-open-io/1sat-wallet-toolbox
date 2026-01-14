@@ -1,11 +1,15 @@
 /**
  * Balance Module
  *
- * Functions for querying wallet balance and payment UTXOs.
+ * Skills for querying wallet balance and payment UTXOs.
  */
 
-import type { WalletInterface } from "@bsv/sdk";
+import type { Skill, OneSatContext } from "../skills/types";
 import { FUNDING_BASKET, WOC_MAINNET_URL, WOC_TESTNET_URL, EXCHANGE_RATE_CACHE_TTL } from "../constants";
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface Balance {
   /** Balance in satoshis */
@@ -26,53 +30,11 @@ export interface PaymentUtxo {
 // Module-level cache for exchange rate
 let exchangeRateCache: { rate: number; timestamp: number } | null = null;
 
-/**
- * Get wallet balance with USD conversion.
- */
-export async function getBalance(
-  cwi: WalletInterface,
-  chain: "main" | "test" = "main",
-  wocApiKey?: string
-): Promise<Balance> {
-  const exchangeRate = await getExchangeRate(chain, wocApiKey);
-  const result = await cwi.listOutputs({ basket: FUNDING_BASKET, limit: 10000 });
-  console.log(
-    `[getBalance] Found ${result.outputs.length} outputs in "${FUNDING_BASKET}" basket, total: ${result.totalOutputs}`,
-  );
-  const satoshis = result.outputs.reduce((sum, o) => sum + o.satoshis, 0);
-  console.log(`[getBalance] Total satoshis: ${satoshis}`);
-  const bsv = satoshis / 100_000_000;
-  const usdInCents = Math.round(bsv * exchangeRate * 100);
-  return { satoshis, bsv, usdInCents };
-}
+// ============================================================================
+// Internal helpers
+// ============================================================================
 
-/**
- * Get payment UTXOs for external use.
- */
-export async function getPaymentUtxos(cwi: WalletInterface): Promise<PaymentUtxo[]> {
-  const result = await cwi.listOutputs({
-    basket: FUNDING_BASKET,
-    include: "locking scripts",
-    limit: 10000,
-  });
-  return result.outputs.map((o) => {
-    const [txid, voutStr] = o.outpoint.split(".");
-    return {
-      txid,
-      vout: parseInt(voutStr, 10),
-      satoshis: o.satoshis,
-      script: o.lockingScript || "",
-    };
-  });
-}
-
-/**
- * Get current BSV/USD exchange rate.
- */
-export async function getExchangeRate(
-  chain: "main" | "test" = "main",
-  wocApiKey?: string
-): Promise<number> {
+async function fetchExchangeRate(chain: "main" | "test", wocApiKey?: string): Promise<number> {
   if (exchangeRateCache && Date.now() - exchangeRateCache.timestamp < EXCHANGE_RATE_CACHE_TTL) {
     return exchangeRateCache.rate;
   }
@@ -94,22 +56,130 @@ export async function getExchangeRate(
   }
 }
 
+// ============================================================================
+// Skills
+// ============================================================================
+
+/** Input for getBalance skill (no required params) */
+export type GetBalanceInput = Record<string, never>;
+
+/**
+ * Get wallet balance with USD conversion.
+ */
+export const getBalance: Skill<GetBalanceInput, Balance> = {
+  meta: {
+    name: "getBalance",
+    description: "Get wallet balance in satoshis, BSV, and USD cents",
+    category: "balance",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  async execute(ctx) {
+    const exchangeRate = await fetchExchangeRate(ctx.chain, ctx.wocApiKey);
+    const result = await ctx.wallet.listOutputs({ basket: FUNDING_BASKET, limit: 10000 });
+    const satoshis = result.outputs.reduce((sum, o) => sum + o.satoshis, 0);
+    const bsv = satoshis / 100_000_000;
+    const usdInCents = Math.round(bsv * exchangeRate * 100);
+    return { satoshis, bsv, usdInCents };
+  },
+};
+
+/** Input for getPaymentUtxos skill (no required params) */
+export type GetPaymentUtxosInput = Record<string, never>;
+
+/**
+ * Get payment UTXOs for external use.
+ */
+export const getPaymentUtxos: Skill<GetPaymentUtxosInput, PaymentUtxo[]> = {
+  meta: {
+    name: "getPaymentUtxos",
+    description: "Get payment UTXOs from the wallet for external use",
+    category: "balance",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  async execute(ctx) {
+    const result = await ctx.wallet.listOutputs({
+      basket: FUNDING_BASKET,
+      include: "locking scripts",
+      limit: 10000,
+    });
+    return result.outputs.map((o) => {
+      const [txid, voutStr] = o.outpoint.split(".");
+      return {
+        txid,
+        vout: Number.parseInt(voutStr, 10),
+        satoshis: o.satoshis,
+        script: o.lockingScript || "",
+      };
+    });
+  },
+};
+
+/** Input for getExchangeRate skill (no required params) */
+export type GetExchangeRateInput = Record<string, never>;
+
+/**
+ * Get current BSV/USD exchange rate.
+ */
+export const getExchangeRate: Skill<GetExchangeRateInput, number> = {
+  meta: {
+    name: "getExchangeRate",
+    description: "Get current BSV/USD exchange rate from WhatsOnChain",
+    category: "balance",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  async execute(ctx) {
+    return fetchExchangeRate(ctx.chain, ctx.wocApiKey);
+  },
+};
+
+/** Input for getChainInfo skill (no required params) */
+export type GetChainInfoInput = Record<string, never>;
+
+/** Output for getChainInfo skill */
+export interface ChainInfo {
+  blocks: number;
+}
+
 /**
  * Get chain info from WhatsOnChain.
  */
-export async function getChainInfo(
-  chain: "main" | "test" = "main",
-  wocApiKey?: string
-): Promise<{ blocks: number } | null> {
-  const baseUrl = chain === "main" ? WOC_MAINNET_URL : WOC_TESTNET_URL;
-  const headers: Record<string, string> = {};
-  if (wocApiKey) headers["woc-api-key"] = wocApiKey;
+export const getChainInfo: Skill<GetChainInfoInput, ChainInfo | null> = {
+  meta: {
+    name: "getChainInfo",
+    description: "Get current chain info (block height) from WhatsOnChain",
+    category: "balance",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  async execute(ctx) {
+    const baseUrl = ctx.chain === "main" ? WOC_MAINNET_URL : WOC_TESTNET_URL;
+    const headers: Record<string, string> = {};
+    if (ctx.wocApiKey) headers["woc-api-key"] = ctx.wocApiKey;
 
-  try {
-    const response = await fetch(`${baseUrl}/chain/info`, { headers });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
+    try {
+      const response = await fetch(`${baseUrl}/chain/info`, { headers });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  },
+};
+
+// ============================================================================
+// Module exports
+// ============================================================================
+
+/** All balance skills for registry */
+export const balanceSkills = [getBalance, getPaymentUtxos, getExchangeRate, getChainInfo];

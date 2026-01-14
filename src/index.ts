@@ -27,3 +27,6 @@ export * from "./sync";
 
 // CWI (Chrome Wallet Interface) - BRC-100 implementations
 export * from "./cwi";
+
+// Wallet factory for creating 1Sat web wallets
+export * from "./wallet";

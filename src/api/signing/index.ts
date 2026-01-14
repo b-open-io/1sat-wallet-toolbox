@@ -1,18 +1,16 @@
 /**
  * Signing Module
  *
- * Functions for message signing.
+ * Skills for message signing.
  */
 
-import {
-  BigNumber,
-  BSM,
-  PublicKey,
-  Signature,
-  Utils,
-  type WalletInterface,
-} from "@bsv/sdk";
+import { BigNumber, BSM, PublicKey, Signature, Utils } from "@bsv/sdk";
+import type { Skill } from "../skills/types";
 import { MESSAGE_SIGNING_PROTOCOL } from "../constants";
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface SignMessageRequest {
   /** Message to sign */
@@ -36,43 +34,84 @@ export interface SignedMessage {
   derivationTag?: SignMessageRequest["tag"];
 }
 
+export interface SignMessageResponse extends Partial<SignedMessage> {
+  error?: string;
+}
+
+// ============================================================================
+// Skills
+// ============================================================================
+
 /**
  * Sign a message using BSM (Bitcoin Signed Message) format.
  */
-export async function signMessage(
-  cwi: WalletInterface,
-  request: SignMessageRequest
-): Promise<SignedMessage | { error: string }> {
-  try {
-    const { message, encoding = "utf8", tag } = request;
-    const messageBytes = Utils.toArray(message, encoding);
-    const msgHash = BSM.magicHash(messageBytes);
-    const keyID = tag ? `${tag.label}:${tag.id}:${tag.domain}` : "identity";
+export const signMessage: Skill<SignMessageRequest, SignMessageResponse> = {
+  meta: {
+    name: "signMessage",
+    description: "Sign a message using BSM (Bitcoin Signed Message) format",
+    category: "signing",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Message to sign" },
+        encoding: {
+          type: "string",
+          description: "Message encoding (utf8, hex, base64)",
+          enum: ["utf8", "hex", "base64"],
+        },
+        tag: {
+          type: "object",
+          description: "Derivation tag for key selection",
+          properties: {
+            label: { type: "string" },
+            id: { type: "string" },
+            domain: { type: "string" },
+            meta: { type: "object" },
+          },
+        },
+      },
+      required: ["message"],
+    },
+  },
+  async execute(ctx, input) {
+    try {
+      const { message, encoding = "utf8", tag } = input;
+      const messageBytes = Utils.toArray(message, encoding);
+      const msgHash = BSM.magicHash(messageBytes);
+      const keyID = tag ? `${tag.label}:${tag.id}:${tag.domain}` : "identity";
 
-    const result = await cwi.createSignature({
-      protocolID: MESSAGE_SIGNING_PROTOCOL,
-      keyID,
-      hashToDirectlySign: Array.from(msgHash),
-    });
+      const result = await ctx.wallet.createSignature({
+        protocolID: MESSAGE_SIGNING_PROTOCOL,
+        keyID,
+        hashToDirectlySign: Array.from(msgHash),
+      });
 
-    const pubKeyResult = await cwi.getPublicKey({
-      protocolID: MESSAGE_SIGNING_PROTOCOL,
-      keyID,
-      forSelf: true,
-    });
+      const pubKeyResult = await ctx.wallet.getPublicKey({
+        protocolID: MESSAGE_SIGNING_PROTOCOL,
+        keyID,
+        forSelf: true,
+      });
 
-    const publicKey = PublicKey.fromString(pubKeyResult.publicKey);
-    const signature = Signature.fromDER(result.signature);
-    const recovery = signature.CalculateRecoveryFactor(publicKey, new BigNumber(msgHash));
+      const publicKey = PublicKey.fromString(pubKeyResult.publicKey);
+      const signature = Signature.fromDER(result.signature);
+      const recovery = signature.CalculateRecoveryFactor(publicKey, new BigNumber(msgHash));
 
-    return {
-      address: publicKey.toAddress(),
-      pubKey: publicKey.toString(),
-      message,
-      sig: signature.toCompact(recovery, true, "base64") as string,
-      derivationTag: tag,
-    };
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "unknown-error" };
-  }
-}
+      return {
+        address: publicKey.toAddress(),
+        pubKey: publicKey.toString(),
+        message,
+        sig: signature.toCompact(recovery, true, "base64") as string,
+        derivationTag: tag,
+      };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "unknown-error" };
+    }
+  },
+};
+
+// ============================================================================
+// Module exports
+// ============================================================================
+
+/** All signing skills for registry */
+export const signingSkills = [signMessage];

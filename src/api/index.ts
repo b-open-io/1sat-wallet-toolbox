@@ -1,36 +1,45 @@
 /**
  * 1Sat Wallet Toolbox API Layer
  *
- * This module provides the OneSatApi class for interacting with the 1Sat ecosystem.
- * All methods work with any BRC-100 compatible wallet interface (CWI).
+ * This module provides skills (self-describing actions) for interacting with the 1Sat ecosystem.
+ * All skills work with any BRC-100 compatible wallet interface via OneSatContext.
  *
  * Usage:
  * ```typescript
- * import { OneSatApi } from '@1sat/wallet-toolbox';
+ * import { createContext, transferOrdinal, skillRegistry } from '@1sat/wallet-toolbox/api';
  *
- * // Create API instance with a CWI-compatible wallet
- * const api = new OneSatApi(cwi);
+ * // Create context with a BRC-100 compatible wallet
+ * const ctx = createContext(wallet, { services, chain: 'main' });
  *
- * // Use the API
- * const balance = await api.getBalance();
- * const ordinals = await api.listOrdinals();
- * const result = await api.sendBsv([{ address: '...', satoshis: 1000 }]);
- * ```
+ * // Execute skills directly
+ * const result = await transferOrdinal.execute(ctx, { outpoint: '...', address: '...' });
  *
- * You can also import functions directly from modules:
- * ```typescript
- * import { listOrdinals } from '@1sat/wallet-toolbox/api/ordinals';
- * import { sendBsv } from '@1sat/wallet-toolbox/api/payments';
+ * // Or via registry (useful for AI agents)
+ * const skill = skillRegistry.get('transferOrdinal');
+ * const result = await skill.execute(ctx, { outpoint: '...', address: '...' });
+ *
+ * // Get MCP-compatible tool list
+ * const tools = skillRegistry.toMcpTools();
  * ```
  */
 
-// Export the main API class
-export { OneSatApi } from "./OneSatApi";
+// Export skill types and helpers
+export {
+  type OneSatContext,
+  type Skill,
+  type SkillMetadata,
+  type SkillCategory,
+  type JsonSchemaProperty,
+  createContext,
+} from "./skills/types";
+
+// Export skill registry
+export { SkillRegistry, skillRegistry, type McpTool } from "./skills/registry";
 
 // Export constants
 export * from "./constants";
 
-// Export module functions and types
+// Export module skills and types
 export * from "./balance";
 export * from "./payments";
 export * from "./ordinals";
@@ -39,6 +48,28 @@ export * from "./inscriptions";
 export * from "./locks";
 export * from "./signing";
 export * from "./broadcast";
+
+// Register all skills with the global registry
+import { skillRegistry } from "./skills/registry";
+import { balanceSkills } from "./balance";
+import { paymentsSkills } from "./payments";
+import { ordinalsSkills } from "./ordinals";
+import { tokensSkills } from "./tokens";
+import { inscriptionsSkills } from "./inscriptions";
+import { locksSkills } from "./locks";
+import { signingSkills } from "./signing";
+import { broadcastSkills } from "./broadcast";
+
+skillRegistry.registerAll([
+  ...balanceSkills,
+  ...paymentsSkills,
+  ...ordinalsSkills,
+  ...tokensSkills,
+  ...inscriptionsSkills,
+  ...locksSkills,
+  ...signingSkills,
+  ...broadcastSkills,
+]);
 
 // Re-export SDK types that consumers commonly need
 export type {
