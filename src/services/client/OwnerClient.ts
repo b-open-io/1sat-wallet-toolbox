@@ -34,6 +34,10 @@ export class OwnerClient extends BaseClient {
       limit: opts?.limit,
       rev: opts?.rev,
       unspent: opts?.unspent,
+      sats: opts?.sats,
+      spend: opts?.spend,
+      events: opts?.events,
+      block: opts?.block,
       refresh: opts?.refresh,
     });
     return this.request<IndexedOutput[]>(`/${owner}/txos${qs}`);

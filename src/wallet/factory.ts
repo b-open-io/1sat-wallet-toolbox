@@ -153,6 +153,7 @@ export async function createWebWallet(
 
 	// 6. Attempt remote storage connection if URL provided
 	if (config.remoteStorageUrl) {
+		console.log(`[createWebWallet] Attempting remote storage connection to ${config.remoteStorageUrl}`);
 		try {
 			const remoteClient = new StorageClient(
 				underlyingWallet as unknown as WalletInterface,
@@ -171,11 +172,49 @@ export async function createWebWallet(
 				remoteClient,
 			]);
 			await storage.makeAvailable();
+
+			// Check for conflicting actives and resolve if needed
+			const storageAny = storage as unknown as {
+				_active?: { settings?: { storageIdentityKey?: string } };
+				_backups?: Array<{ settings?: { storageIdentityKey?: string } }>;
+				_conflictingActives?: Array<{ settings?: { storageIdentityKey?: string } }>;
+				setActive?: (storageIdentityKey: string, log?: (msg: string) => string) => Promise<void>;
+				updateBackups?: (activeSync?: unknown, log?: (msg: string) => string) => Promise<string>;
+			};
+			console.log("[createWebWallet] Storage state:", {
+				activeKey: storageAny._active?.settings?.storageIdentityKey,
+				backups: storageAny._backups?.map(b => b.settings?.storageIdentityKey),
+				conflictingActives: storageAny._conflictingActives?.map(c => c.settings?.storageIdentityKey),
+			});
+
+			// If there are conflicting actives, resolve by setting local as active (merges remote data)
+			if (storageAny._conflictingActives && storageAny._conflictingActives.length > 0) {
+				const localKey = storageAny._active?.settings?.storageIdentityKey;
+				if (localKey && storageAny.setActive) {
+					console.log("[createWebWallet] Resolving conflicts by merging into local storage...");
+					await storageAny.setActive(localKey, (msg) => {
+						console.log("[createWebWallet] Sync:", msg);
+						return msg;
+					});
+					console.log("[createWebWallet] Conflict resolution complete");
+				}
+			} else if (storageAny._backups && storageAny._backups.length > 0 && storageAny.updateBackups) {
+				// No conflicts - push local state to remote backup
+				console.log("[createWebWallet] Pushing local state to remote backup...");
+				await storageAny.updateBackups(undefined, (msg) => {
+					console.log("[createWebWallet] Backup:", msg);
+					return msg;
+				});
+				console.log("[createWebWallet] Backup complete");
+			}
+
 			// Update wallet's storage reference
 			(
 				underlyingWallet as unknown as { _storage: WalletStorageManager }
 			)._storage = storage;
-		} catch {
+			console.log("[createWebWallet] Remote storage connected successfully");
+		} catch (err) {
+			console.log("[createWebWallet] Remote storage connection failed:", err instanceof Error ? err.message : err);
 			// Graceful degradation - continue with local only
 		}
 	}

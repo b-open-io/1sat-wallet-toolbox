@@ -44,7 +44,8 @@ export type SkillCategory =
   | "inscriptions"
   | "locks"
   | "signing"
-  | "broadcast";
+  | "broadcast"
+  | "sweep";
 
 /**
  * Metadata describing a skill for AI agents and tooling.

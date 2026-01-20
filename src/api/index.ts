@@ -49,6 +49,9 @@ export * from "./locks";
 export * from "./signing";
 export * from "./broadcast";
 
+// Export sweep module (uses external signing, not skill-based)
+export * from "./sweep";
+
 // Register all skills with the global registry
 import { skillRegistry } from "./skills/registry";
 import { balanceSkills } from "./balance";
@@ -59,6 +62,7 @@ import { inscriptionsSkills } from "./inscriptions";
 import { locksSkills } from "./locks";
 import { signingSkills } from "./signing";
 import { broadcastSkills } from "./broadcast";
+import { sweepSkills } from "./sweep";
 
 skillRegistry.registerAll([
   ...balanceSkills,
@@ -69,6 +73,7 @@ skillRegistry.registerAll([
   ...locksSkills,
   ...signingSkills,
   ...broadcastSkills,
+  ...sweepSkills,
 ]);
 
 // Re-export SDK types that consumers commonly need

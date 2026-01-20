@@ -10,6 +10,7 @@ export * from "./api";
 // Services
 export { OneSatServices, type SyncOutput } from "./services/OneSatServices";
 export type {
+  IndexedOutput,
   OrdfsMetadata,
   OrdfsContentOptions,
   OrdfsContentResponse,
