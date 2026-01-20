@@ -80,3 +80,35 @@ Background sync processing with storage adapters:
 ## Browser Target
 
 The build targets browser with Buffer polyfill. Entry point (`src/index.ts`) ensures `globalThis.Buffer` is available before any other imports.
+
+## Example Apps
+
+### sweep-ui (`examples/sweep-ui/`)
+
+Browser-based tool for sweeping UTXOs from legacy wallets to BRC-100 wallets.
+
+**Development:**
+```bash
+# Start dev server persistently (survives shell session)
+cd examples/sweep-ui && nohup bun run dev > /tmp/sweep-ui.log 2>&1 &
+
+# Check if running
+lsof -i :5173
+
+# View logs
+tail -f /tmp/sweep-ui.log
+
+# Stop server
+pkill -f "vite.*sweep-ui" || kill $(lsof -t -i :5173)
+```
+
+**Important:** Always use `nohup` when starting dev servers in background. Plain `&` will die when the shell session ends.
+
+**Features:**
+- TanStack Query infinite pagination for fetching all UTXOs
+- Multi-state dialog flow (idle → loading → results → preview)
+- Real-time totals as pages are fetched
+- BSV price from WhatsOnChain API
+- USD/BSV/sats balance display
+
+**Note:** Uses `file:../..` dependency which requires Vite dedupe config to avoid multiple React copies.
