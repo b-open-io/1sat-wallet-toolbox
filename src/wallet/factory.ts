@@ -199,13 +199,16 @@ export async function createWebWallet(
 					console.log("[createWebWallet] Conflict resolution complete");
 				}
 			} else if (storageAny._backups && storageAny._backups.length > 0 && storageAny.updateBackups) {
-				// No conflicts - push local state to remote backup
-				console.log("[createWebWallet] Pushing local state to remote backup...");
-				await storageAny.updateBackups(undefined, (msg) => {
+				// No conflicts - push local state to remote backup (non-blocking to avoid IDB timeout)
+				console.log("[createWebWallet] Starting background backup to remote...");
+				storageAny.updateBackups(undefined, (msg) => {
 					console.log("[createWebWallet] Backup:", msg);
 					return msg;
+				}).then(() => {
+					console.log("[createWebWallet] Background backup complete");
+				}).catch((err: unknown) => {
+					console.log("[createWebWallet] Background backup failed:", err instanceof Error ? err.message : err);
 				});
-				console.log("[createWebWallet] Backup complete");
 			}
 
 			// Update wallet's storage reference
