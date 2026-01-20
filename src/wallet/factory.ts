@@ -31,8 +31,8 @@ const DEFAULT_DATABASE_NAME = "wallet";
 // Default timeout for remote storage connection
 const DEFAULT_REMOTE_STORAGE_TIMEOUT = 5000;
 
-// Default fee model
-const DEFAULT_FEE_MODEL = { model: "sat/kb" as const, value: 1 };
+// Default fee model (100 sat/kb matches yours-wallet and 1sat-indexer minimum)
+const DEFAULT_FEE_MODEL = { model: "sat/kb" as const, value: 100 };
 
 /**
  * Configuration for creating a web wallet.

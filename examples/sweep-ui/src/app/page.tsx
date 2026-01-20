@@ -11,7 +11,6 @@ import {
   createWebWallet,
   FUNDING_BASKET,
   type IndexedOutput,
-  type OrdfsMetadata,
   type WebWalletConfig,
   type WebWalletResult,
 } from "@1sat/wallet-toolbox";
@@ -57,10 +56,6 @@ function parseWif(
   }
 }
 
-function isImageType(contentType: string): boolean {
-  return contentType.startsWith("image/");
-}
-
 // ============================================================================
 // CONSTANTS & TYPES
 // ============================================================================
@@ -88,59 +83,24 @@ const TEST_PERMISSIONS_CONFIG = {
   differentiatePrivilegedOperations: false,
 };
 
-interface OrdinalWithMetadata extends IndexedOutput {
-  metadata?: OrdfsMetadata;
-  metadataError?: string;
-}
-
 type DialogState =
   | { type: "idle" }
   | { type: "loading" }
   | { type: "results" }
   | { type: "preview"; sweepType: string; items: IndexedOutput[]; amount?: number };
 
-interface TagTotals {
-  count: number;
-  sats: number;
-  items: IndexedOutput[];
-}
+/**
+ * Filter outputs to get only funding UTXOs (P2PKH with satoshis > 1)
+ */
+function getFundingOutputs(outputs: IndexedOutput[]): IndexedOutput[] {
+  return outputs.filter((o) => {
+    const sats = o.satoshis ?? 0;
+    if (sats <= 1) return false;
 
-// Tag display config - only lock and list are script-locked (non-sweepable)
-const TAG_CONFIG: Record<
-  string,
-  { label: string; color: string; sweepable: boolean }
-> = {
-  fund: { label: "Funds", color: "#4ade80", sweepable: true },
-  "1sat": { label: "Ordinals (1sat)", color: "#a78bfa", sweepable: true },
-  own: { label: "Owned", color: "#60a5fa", sweepable: true },
-  p2pkh: { label: "P2PKH", color: "#34d399", sweepable: true },
-  bsv21: { label: "BSV-21 Tokens", color: "#06b6d4", sweepable: true },
-  opns: { label: "OPNS Names", color: "#ec4899", sweepable: true },
-  lock: { label: "Locks", color: "#fbbf24", sweepable: false },
-  list: { label: "Listed (OrdLock)", color: "#f97316", sweepable: false },
-};
-
-const TAG_ORDER = ["fund", "1sat", "lock", "list", "bsv21", "opns"];
-
-function getTagConfig(tag: string) {
-  return TAG_CONFIG[tag] ?? { label: tag, color: "#888", sweepable: true };
-}
-
-function computeTotalsByTag(outputs: IndexedOutput[]): Record<string, TagTotals> {
-  const result: Record<string, TagTotals> = {};
-  for (const output of outputs) {
-    const events = output.events ?? ["fund"];
-    for (const event of events) {
-      const tag = event.split(":")[0];
-      if (!result[tag]) {
-        result[tag] = { count: 0, sats: 0, items: [] };
-      }
-      result[tag].count++;
-      result[tag].sats += output.satoshis ?? 0;
-      result[tag].items.push(output);
-    }
-  }
-  return result;
+    // P2PKH outputs with satoshis > 1 are funding UTXOs
+    // Events are in format "p2pkh:address"
+    return o.events?.some((e) => e.startsWith("p2pkh:")) ?? false;
+  });
 }
 
 // ============================================================================
@@ -329,6 +289,7 @@ function useDestinationWallet(svc: OneSatServices): DestinationWalletState {
           adminOriginator: window.location.origin,
           permissionsConfig: TEST_PERMISSIONS_CONFIG,
           remoteStorageUrl: svc.storageUrl,
+          feeModel: { model: "sat/kb", value: 100 },
         };
 
         addLog("Creating wallet...");
@@ -408,16 +369,16 @@ function SourceIdleState() {
 }
 
 function SourceLoadingState({
-  totalsByTag,
-  sortedTags,
+  fundingOutputs,
   pagesFetched,
   isFetchingNextPage,
 }: {
-  totalsByTag: Record<string, TagTotals>;
-  sortedTags: string[];
+  fundingOutputs: IndexedOutput[];
   pagesFetched: number;
   isFetchingNextPage: boolean;
 }) {
+  const totalSats = fundingOutputs.reduce((sum, o) => sum + (o.satoshis ?? 0), 0);
+
   return (
     <Panel className="mt-0.5 rounded-t-none border-t-0">
       <div className="text-center p-6">
@@ -430,33 +391,22 @@ function SourceLoadingState({
         </div>
       </div>
 
-      {Object.keys(totalsByTag).length > 0 ? (
+      {fundingOutputs.length > 0 ? (
         <div className="mt-6 p-4 bg-black/20 rounded-xl">
           <div className="text-[11px] text-muted-foreground mb-3 uppercase tracking-wider">
             Discovered
           </div>
-          {sortedTags.map((tag) => {
-            const config = getTagConfig(tag);
-            const data = totalsByTag[tag];
-            return (
-              <div
-                key={tag}
-                className="flex justify-between items-center py-2 border-b border-white/5 last:border-b-0"
-              >
-                <span className="font-medium text-[13px]" style={{ color: config.color }}>
-                  {config.label}
-                </span>
-                <span className="text-[13px]">
-                  <span className="text-foreground">{data.count}</span>
-                  {data.sats > 0 ? (
-                    <span className="text-chart-2 ml-2">
-                      {data.sats.toLocaleString()} sats
-                    </span>
-                  ) : null}
-                </span>
-              </div>
-            );
-          })}
+          <div className="flex justify-between items-center py-2">
+            <span className="font-medium text-[13px] text-chart-2">
+              Funding UTXOs
+            </span>
+            <span className="text-[13px]">
+              <span className="text-foreground">{fundingOutputs.length}</span>
+              <span className="text-chart-2 ml-2">
+                {totalSats.toLocaleString()} sats
+              </span>
+            </span>
+          </div>
         </div>
       ) : null}
     </Panel>
@@ -470,15 +420,14 @@ function SourcePreviewState({
   dialogState: Extract<DialogState, { type: "preview" }>;
   price: number;
 }) {
-  const config = getTagConfig(dialogState.sweepType);
   return (
     <Panel className="mt-0.5 rounded-t-none border-t-0">
       <div className="text-center mb-5">
-        <h3 className="m-0 mb-2" style={{ color: config.color }}>
+        <h3 className="m-0 mb-2 text-chart-2">
           Confirm Sweep
         </h3>
         <p className="m-0 text-[13px] text-muted-foreground">
-          Sweeping {dialogState.items.length} {config.label} outputs
+          Sweeping {dialogState.items.length} Funding UTXO{dialogState.items.length !== 1 ? "s" : ""}
         </p>
       </div>
       <BalanceDisplay
@@ -492,34 +441,27 @@ function SourcePreviewState({
 }
 
 function SourceResultsState({
-  totalsByTag,
-  sortedTags,
-  totalSats,
+  fundingOutputs,
   price,
   hasWallet,
   sweepAmount,
   onAmountChange,
-  onSweepTag,
-  ordinalsWithMetadata,
+  onSweepFunding,
   isError,
   error,
   sweepResult,
 }: {
-  totalsByTag: Record<string, TagTotals>;
-  sortedTags: string[];
-  totalSats: number;
+  fundingOutputs: IndexedOutput[];
   price: number;
   hasWallet: boolean;
   sweepAmount: string;
   onAmountChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onSweepTag: (tag: string, all: boolean, amount?: number) => void;
-  ordinalsWithMetadata: OrdinalWithMetadata[];
+  onSweepFunding: (all: boolean, amount?: number) => void;
   isError: boolean;
   error: Error | null;
   sweepResult: { txid?: string; error?: string } | null;
 }) {
-  const allOutputs = Object.values(totalsByTag).flatMap((t) => t.items);
-  const hasNoOutputs = allOutputs.length === 0;
+  const totalSats = fundingOutputs.reduce((sum, o) => sum + (o.satoshis ?? 0), 0);
 
   return (
     <Panel className="mt-0.5 rounded-t-none border-t-0">
@@ -546,154 +488,66 @@ function SourceResultsState({
         </div>
       ) : null}
 
-      {hasNoOutputs ? (
+      {fundingOutputs.length === 0 ? (
         <div className="text-center py-10 px-5">
           <div className="text-[32px] mb-3 opacity-30">∅</div>
-          <p className="m-0 text-muted-foreground">No UTXOs found for this address</p>
+          <p className="m-0 text-muted-foreground">No funding UTXOs found for this address</p>
         </div>
       ) : (
         <>
           {/* Total Balance */}
-          <div className="p-5 bg-gradient-to-br from-primary/5 to-transparent rounded-xl border border-primary/20 mb-5 text-center">
-            <BalanceDisplay
-              sats={totalSats}
-              price={price}
-              label="Total Source Value"
-              size="large"
-              align="center"
-            />
-          </div>
-
-          {/* Output Categories */}
-          <div className="flex flex-col gap-3">
-            {sortedTags.map((tag) => {
-              const config = getTagConfig(tag);
-              const data = totalsByTag[tag];
-              const isFund = tag === "fund";
-
-              return (
-                <div
-                  key={tag}
-                  className="p-4 bg-muted rounded-[10px]"
-                  style={{ borderColor: `${config.color}20`, borderWidth: "1px" }}
-                >
-                  <div
-                    className={cn(
-                      "flex justify-between items-start",
-                      isFund && config.sweepable && "mb-3"
-                    )}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="w-2 h-2 rounded-full" style={{ background: config.color }} />
-                        <span className="text-sm font-semibold" style={{ color: config.color }}>
-                          {config.label}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {data.count} output{data.count !== 1 ? "s" : ""}
-                        {!config.sweepable ? (
-                          <span className="ml-2 italic">(script-locked)</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    {data.sats > 0 ? (
-                      <BalanceDisplay sats={data.sats} price={price} size="small" align="right" />
-                    ) : null}
-                  </div>
-
-                  {isFund && config.sweepable ? (
-                    <div className="flex gap-2 flex-wrap items-center">
-                      <Button
-                        type="button"
-                        onClick={() => onSweepTag("fund", true)}
-                        disabled={!hasWallet}
-                        size="sm"
-                        className={cn("text-xs", hasWallet && "bg-chart-2 hover:bg-chart-2/90 text-black")}
-                      >
-                        Sweep All →
-                      </Button>
-                      <Input
-                        type="number"
-                        placeholder="Amount (sats)"
-                        value={sweepAmount}
-                        onChange={onAmountChange}
-                        disabled={!hasWallet}
-                        className="w-[120px] text-xs bg-black/30"
-                      />
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          const amt = Number.parseInt(sweepAmount, 10);
-                          if (amt > 0) onSweepTag("fund", false, amt);
-                        }}
-                        disabled={!hasWallet || !sweepAmount}
-                        size="sm"
-                        variant="secondary"
-                        className="text-xs"
-                      >
-                        Sweep Amount →
-                      </Button>
-                    </div>
-                  ) : config.sweepable && tag !== "fund" ? (
-                    <Button
-                      type="button"
-                      onClick={() => onSweepTag(tag, true)}
-                      disabled={!hasWallet}
-                      size="sm"
-                      className="mt-3 text-xs"
-                      style={{
-                        backgroundColor: hasWallet ? config.color : undefined,
-                        color: hasWallet ? "#000" : undefined,
-                      }}
-                    >
-                      Sweep All →
-                    </Button>
-                  ) : null}
+          <div className="p-5 bg-gradient-to-br from-chart-2/5 to-transparent rounded-xl border border-chart-2/20 mb-5">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-chart-2" />
+                  <span className="text-sm font-semibold text-chart-2">
+                    Funding UTXOs
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Ordinals Preview */}
-          {ordinalsWithMetadata.length > 0 ? (
-            <div className="mt-6">
-              <div className="text-[13px] font-semibold text-chart-2 mb-3">
-                Ordinals Preview ({ordinalsWithMetadata.length})
-              </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
-                {ordinalsWithMetadata.slice(0, 8).map((ordinal) => {
-                  const contentOutpoint = ordinal.metadata?.origin ?? ordinal.outpoint;
-                  const contentUrl = services.ordfs.getContentUrl(contentOutpoint);
-                  const hasContent = ordinal.metadata?.contentType;
-                  const isImage = hasContent ? isImageType(ordinal.metadata!.contentType) : false;
-
-                  return (
-                    <div key={ordinal.outpoint} className="p-2 bg-black/20 rounded-lg border border-chart-2/20">
-                      {isImage ? (
-                        <img src={contentUrl} alt="" className="w-full aspect-square object-cover rounded mb-1" />
-                      ) : (
-                        <div className="w-full aspect-square bg-chart-2/10 rounded mb-1 flex items-center justify-center text-xl opacity-50">
-                          ◆
-                        </div>
-                      )}
-                      <div className="text-[9px] text-muted-foreground font-mono overflow-hidden text-ellipsis">
-                        {ordinal.outpoint.substring(0, 12)}...
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {ordinalsWithMetadata.length > 8 ? (
-                <div className="mt-2 text-xs text-muted-foreground text-center">
-                  +{ordinalsWithMetadata.length - 8} more
+                <div className="text-xs text-muted-foreground">
+                  {fundingOutputs.length} output{fundingOutputs.length !== 1 ? "s" : ""}
                 </div>
-              ) : null}
+              </div>
+              <BalanceDisplay sats={totalSats} price={price} size="default" align="right" />
             </div>
-          ) : null}
+
+            <div className="flex gap-2 flex-wrap items-center">
+              <Button
+                type="button"
+                onClick={() => onSweepFunding(true)}
+                disabled={!hasWallet}
+                size="sm"
+                className={cn("text-xs", hasWallet && "bg-chart-2 hover:bg-chart-2/90 text-black")}
+              >
+                Sweep All →
+              </Button>
+              <Input
+                type="number"
+                placeholder="Amount (sats)"
+                value={sweepAmount}
+                onChange={onAmountChange}
+                disabled={!hasWallet}
+                className="w-[120px] text-xs bg-black/30"
+              />
+              <Button
+                type="button"
+                onClick={() => {
+                  const amt = Number.parseInt(sweepAmount, 10);
+                  if (amt > 0) onSweepFunding(false, amt);
+                }}
+                disabled={!hasWallet || !sweepAmount}
+                size="sm"
+                variant="secondary"
+                className="text-xs"
+              >
+                Sweep Amount →
+              </Button>
+            </div>
+          </div>
 
           {!hasWallet ? (
-            <div className="mt-4 p-3 bg-chart-4/10 rounded-lg text-xs text-chart-4 text-center">
+            <div className="p-3 bg-chart-4/10 rounded-lg text-xs text-chart-4 text-center">
               ⚠ Enter destination wallet WIF to enable sweep
             </div>
           ) : null}
@@ -774,58 +628,31 @@ function SourceWalletInput({
 
 function SourceContentPreview({
   dialogState,
-  totalsByTag,
+  fundingOutputs,
   pagesFetched,
   isFetchingNextPage,
   price,
   hasWallet,
   sweepAmount,
   setSweepAmount,
-  onSweepTag,
-  ordinalsWithMetadata,
+  onSweepFunding,
   isError,
   error,
   sweepResult,
 }: {
   dialogState: DialogState;
-  totalsByTag: Record<string, TagTotals>;
+  fundingOutputs: IndexedOutput[];
   pagesFetched: number;
   isFetchingNextPage: boolean;
   price: number;
   hasWallet: boolean;
   sweepAmount: string;
   setSweepAmount: (v: string) => void;
-  onSweepTag: (tag: string, all: boolean, amount?: number) => void;
-  ordinalsWithMetadata: OrdinalWithMetadata[];
+  onSweepFunding: (all: boolean, amount?: number) => void;
   isError: boolean;
   error: Error | null;
   sweepResult: { txid?: string; error?: string } | null;
 }) {
-  const sortedTags = useMemo(() => {
-    return Object.keys(totalsByTag).sort((a, b) => {
-      const aIdx = TAG_ORDER.indexOf(a);
-      const bIdx = TAG_ORDER.indexOf(b);
-      if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
-      if (aIdx === -1) return 1;
-      if (bIdx === -1) return -1;
-      return aIdx - bIdx;
-    });
-  }, [totalsByTag]);
-
-  const totalSats = useMemo(() => {
-    const seen = new Set<string>();
-    let total = 0;
-    for (const data of Object.values(totalsByTag)) {
-      for (const item of data.items) {
-        if (!seen.has(item.outpoint)) {
-          seen.add(item.outpoint);
-          total += item.satoshis ?? 0;
-        }
-      }
-    }
-    return total;
-  }, [totalsByTag]);
-
   const handleAmountChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setSweepAmount(e.target.value),
     [setSweepAmount]
@@ -837,8 +664,7 @@ function SourceContentPreview({
     case "loading":
       return (
         <SourceLoadingState
-          totalsByTag={totalsByTag}
-          sortedTags={sortedTags}
+          fundingOutputs={fundingOutputs}
           pagesFetched={pagesFetched}
           isFetchingNextPage={isFetchingNextPage}
         />
@@ -848,15 +674,12 @@ function SourceContentPreview({
     case "results":
       return (
         <SourceResultsState
-          totalsByTag={totalsByTag}
-          sortedTags={sortedTags}
-          totalSats={totalSats}
+          fundingOutputs={fundingOutputs}
           price={price}
           hasWallet={hasWallet}
           sweepAmount={sweepAmount}
           onAmountChange={handleAmountChange}
-          onSweepTag={onSweepTag}
-          ordinalsWithMetadata={ordinalsWithMetadata}
+          onSweepFunding={onSweepFunding}
           isError={isError}
           error={error}
           sweepResult={sweepResult}
@@ -1000,7 +823,6 @@ function SweepConfirmationModal({
   onConfirm: () => void;
   sweeping: boolean;
 }) {
-  const config = getTagConfig(dialogState.sweepType);
   const { totalSats, txCount, estFees, netAmount } = useMemo(() => {
     const total = dialogState.items.reduce(
       (sum, i) => sum + (i.satoshis ?? 0),
@@ -1017,19 +839,13 @@ function SweepConfirmationModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[1000] p-5">
-      <Card
-        className="w-full max-w-[420px] p-7 bg-gradient-to-br from-card to-black rounded-[20px]"
-        style={{
-          borderColor: `${config.color}40`,
-          boxShadow: `0 0 60px ${config.color}20`,
-        }}
-      >
-        <h2 className="m-0 mb-2 text-center text-[22px]" style={{ color: config.color }}>
+      <Card className="w-full max-w-[420px] p-7 bg-gradient-to-br from-card to-black rounded-[20px] border-chart-2/40">
+        <h2 className="m-0 mb-2 text-center text-[22px] text-chart-2">
           Confirm Sweep
         </h2>
         <p className="m-0 mb-6 text-center text-sm text-muted-foreground">
           Sweeping <strong className="text-foreground">{dialogState.items.length}</strong>{" "}
-          {config.label} outputs
+          Funding UTXO{dialogState.items.length !== 1 ? "s" : ""}
         </p>
 
         <div className="mb-6">
@@ -1085,11 +901,10 @@ function SweepConfirmationModal({
             type="button"
             onClick={onConfirm}
             disabled={sweeping}
-            className="flex-1 gap-2"
-            style={{
-              backgroundColor: sweeping ? undefined : config.color,
-              color: sweeping ? undefined : "#000",
-            }}
+            className={cn(
+              "flex-1 gap-2",
+              !sweeping && "bg-chart-2 hover:bg-chart-2/90 text-black"
+            )}
           >
             {sweeping ? (
               <>
@@ -1115,7 +930,6 @@ export default function SweepPage() {
   const [wif, setWif] = useState("");
   const [address, setAddress] = useState("");
   const [dialogState, setDialogState] = useState<DialogState>({ type: "idle" });
-  const [ordinalsWithMetadata, setOrdinalsWithMetadata] = useState<OrdinalWithMetadata[]>([]);
 
   // Destination state (consolidated into hook)
   const {
@@ -1190,52 +1004,21 @@ export default function SweepPage() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const allOutputs = useMemo(() => data?.pages.flat() ?? [], [data]);
-  const totalsByTag = useMemo(() => computeTotalsByTag(allOutputs), [allOutputs]);
-  const ordinalsCount = totalsByTag["1sat"]?.count ?? 0;
+  const fundingOutputs = useMemo(() => getFundingOutputs(allOutputs), [allOutputs]);
   const pagesFetched = data?.pages.length ?? 0;
 
-  // Transition to results
+  // Transition to results when all pages fetched
   useEffect(() => {
     if (
       dialogState.type === "loading" &&
       !hasNextPage &&
       !isLoading &&
-      !isFetchingNextPage
+      !isFetchingNextPage &&
+      data
     ) {
-      if (allOutputs.length > 0) {
-        setDialogState({ type: "results" });
-        // Fetch ordinal metadata
-        const ordinals = totalsByTag["1sat"]?.items ?? [];
-        Promise.all(
-          ordinals.map(async (ordinal) => {
-            try {
-              const metadata = await services.ordfs.getMetadata(
-                ordinal.outpoint,
-                0
-              );
-              return { ...ordinal, metadata };
-            } catch (e) {
-              return {
-                ...ordinal,
-                metadataError: e instanceof Error ? e.message : "Failed",
-              };
-            }
-          })
-        ).then(setOrdinalsWithMetadata);
-      } else if (data) {
-        setDialogState({ type: "results" });
-      }
+      setDialogState({ type: "results" });
     }
-  }, [
-    dialogState.type,
-    hasNextPage,
-    isLoading,
-    isFetchingNextPage,
-    allOutputs.length,
-    ordinalsCount,
-    totalsByTag,
-    data,
-  ]);
+  }, [dialogState.type, hasNextPage, isLoading, isFetchingNextPage, data]);
 
   // Handlers
   const handleWifChange = useCallback(
@@ -1255,23 +1038,21 @@ export default function SweepPage() {
       if (!parsedWif || parsedWif.error) return;
       setAddress(parsedWif.address);
       setDialogState({ type: "loading" });
-      setOrdinalsWithMetadata([]);
     },
     [parsedWif]
   );
 
-  const handleSweepTag = useCallback(
-    (tag: string, all: boolean, amount?: number) => {
-      const items = totalsByTag[tag]?.items ?? [];
-      if (items.length === 0) return;
+  const handleSweepFunding = useCallback(
+    (all: boolean, amount?: number) => {
+      if (fundingOutputs.length === 0) return;
       setDialogState({
         type: "preview",
-        sweepType: tag,
-        items,
+        sweepType: "fund",
+        items: fundingOutputs,
         amount: all ? undefined : amount,
       });
     },
-    [totalsByTag]
+    [fundingOutputs]
   );
 
   const handleCancelPreview = useCallback(
@@ -1353,15 +1134,14 @@ export default function SweepPage() {
         />
         <SourceContentPreview
           dialogState={dialogState}
-          totalsByTag={totalsByTag}
+          fundingOutputs={fundingOutputs}
           pagesFetched={pagesFetched}
           isFetchingNextPage={isFetchingNextPage}
           price={bsvPrice}
           hasWallet={hasWallet}
           sweepAmount={sweepAmount}
           setSweepAmount={setSweepAmount}
-          onSweepTag={handleSweepTag}
-          ordinalsWithMetadata={ordinalsWithMetadata}
+          onSweepFunding={handleSweepFunding}
           isError={isError}
           error={error}
           sweepResult={sweepResult}
