@@ -187,32 +187,32 @@ export async function createWebWallet(
 				conflictingActives: storageAny._conflictingActives?.map(c => c.settings?.storageIdentityKey),
 			});
 
-			// If there are conflicting actives, resolve by setting local as active (merges remote data)
-			// Non-blocking to avoid IDB transaction timeout
+			// Treat backups as conflicts to pull any data they have.
+			// Remote storage may have transactions that local doesn't know about
+			// (e.g., from sweep-ui syncing to remote).
+			if (storageAny._backups && storageAny._backups.length > 0) {
+				console.log("[createWebWallet] Reclassifying backups as conflicts to pull remote data...");
+				storageAny._conflictingActives = storageAny._conflictingActives || [];
+				storageAny._conflictingActives.push(...storageAny._backups);
+				storageAny._backups = [];
+			}
+
+			// If there are conflicting actives (including reclassified backups), resolve by merging into local
+			// This is now blocking since setActive no longer holds IDB transactions during network calls
 			if (storageAny._conflictingActives && storageAny._conflictingActives.length > 0) {
 				const localKey = storageAny._active?.settings?.storageIdentityKey;
 				if (localKey && storageAny.setActive) {
-					console.log("[createWebWallet] Resolving conflicts by merging into local storage...");
-					storageAny.setActive(localKey, (msg) => {
-						console.log("[createWebWallet] Sync:", msg);
-						return msg;
-					}).then(() => {
-						console.log("[createWebWallet] Conflict resolution complete");
-					}).catch((err: unknown) => {
-						console.log("[createWebWallet] Conflict resolution failed:", err instanceof Error ? err.message : err);
-					});
+					console.log("[createWebWallet] Syncing with remote storage...");
+					try {
+						await storageAny.setActive(localKey, (msg: string) => {
+							console.log("[createWebWallet] Sync:", msg);
+							return msg;
+						});
+						console.log("[createWebWallet] Remote sync complete");
+					} catch (err: unknown) {
+						console.log("[createWebWallet] Remote sync failed:", err instanceof Error ? err.message : err);
+					}
 				}
-			} else if (storageAny._backups && storageAny._backups.length > 0 && storageAny.updateBackups) {
-				// No conflicts - push local state to remote backup (non-blocking to avoid IDB timeout)
-				console.log("[createWebWallet] Starting background backup to remote...");
-				storageAny.updateBackups(undefined, (msg) => {
-					console.log("[createWebWallet] Backup:", msg);
-					return msg;
-				}).then(() => {
-					console.log("[createWebWallet] Background backup complete");
-				}).catch((err: unknown) => {
-					console.log("[createWebWallet] Background backup failed:", err instanceof Error ? err.message : err);
-				});
 			}
 
 			// Update wallet's storage reference
