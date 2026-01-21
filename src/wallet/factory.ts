@@ -20,7 +20,7 @@ import {
   type sdk as mobileToolboxSdk,
 } from "@bsv/wallet-toolbox-mobile/out/src/index.client.js";
 import { OneSatServices } from "../services/OneSatServices";
-import { type FullSyncResult, fullSync } from "./fullSync";
+import { type FullSyncResult, type FullSyncStage, fullSync } from "./fullSync";
 
 type Chain = "main" | "test";
 type WalletServices = toolboxSdk.WalletServices;
@@ -66,7 +66,7 @@ export interface WebWalletResult {
   /** Cleanup function - stops monitor, destroys wallet */
   destroy: () => Promise<void>;
   /** Full sync with remote backup (only available if remoteStorageUrl was provided and connected) */
-  fullSync?: () => Promise<FullSyncResult>;
+  fullSync?: (onProgress?: (stage: FullSyncStage, message: string) => void) => Promise<FullSyncResult>;
 }
 
 /**
@@ -297,11 +297,12 @@ export async function createWebWallet(
 
   // 10. Create fullSync function if remote storage is connected
   const fullSyncFn = remoteClient
-    ? async (): Promise<FullSyncResult> => {
+    ? async (onProgress?: (stage: FullSyncStage, message: string) => void): Promise<FullSyncResult> => {
         return fullSync({
           storage,
           remoteStorage: remoteClient,
           identityKey: identityPubKey,
+          onProgress,
         });
       }
     : undefined;
