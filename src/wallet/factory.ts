@@ -188,15 +188,19 @@ export async function createWebWallet(
 			});
 
 			// If there are conflicting actives, resolve by setting local as active (merges remote data)
+			// Non-blocking to avoid IDB transaction timeout
 			if (storageAny._conflictingActives && storageAny._conflictingActives.length > 0) {
 				const localKey = storageAny._active?.settings?.storageIdentityKey;
 				if (localKey && storageAny.setActive) {
 					console.log("[createWebWallet] Resolving conflicts by merging into local storage...");
-					await storageAny.setActive(localKey, (msg) => {
+					storageAny.setActive(localKey, (msg) => {
 						console.log("[createWebWallet] Sync:", msg);
 						return msg;
+					}).then(() => {
+						console.log("[createWebWallet] Conflict resolution complete");
+					}).catch((err: unknown) => {
+						console.log("[createWebWallet] Conflict resolution failed:", err instanceof Error ? err.message : err);
 					});
-					console.log("[createWebWallet] Conflict resolution complete");
 				}
 			} else if (storageAny._backups && storageAny._backups.length > 0 && storageAny.updateBackups) {
 				// No conflicts - push local state to remote backup (non-blocking to avoid IDB timeout)

@@ -292,7 +292,7 @@ function useDestinationWallet(svc: OneSatServices): DestinationWalletState {
           feeModel: { model: "sat/kb", value: 100 },
         };
 
-        addLog("Creating wallet...");
+        addLog(`Creating wallet with remoteStorageUrl: ${config.remoteStorageUrl}`);
         const result = await createWebWallet(config);
         walletRef.current = result;
         setWallet(result);
