@@ -489,11 +489,13 @@ function OrdinalCard({
   isSelected,
   isSweepable,
   onToggle,
+  contentUrl,
 }: {
   ordinal: OrdinalWithMetadata;
   isSelected: boolean;
   isSweepable: boolean;
   onToggle: () => void;
+  contentUrl: string;
 }) {
   const contentType = ordinal.metadata?.contentType ?? "";
   const isImage = isImageType(contentType);
@@ -501,9 +503,7 @@ function OrdinalCard({
   const hasMetadata = !!ordinal.metadata;
   const hasError = !!ordinal.metadataError;
 
-  const thumbnailUrl = isImage
-    ? `https://ordfs.1satordinals.com/${ordinal.outpoint}`
-    : null;
+  const thumbnailUrl = isImage ? contentUrl : null;
 
   return (
     <div
@@ -663,6 +663,7 @@ function OrdinalsSection({
             isSelected={selectedOrdinals.has(ordinal.outpoint)}
             isSweepable={sweepableOutpoints.has(ordinal.outpoint)}
             onToggle={() => onToggle(ordinal.outpoint)}
+            contentUrl={services.ordfs.getContentUrl(ordinal.outpoint)}
           />
         ))}
       </div>
