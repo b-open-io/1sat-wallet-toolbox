@@ -663,7 +663,7 @@ function OrdinalsSection({
             isSelected={selectedOrdinals.has(ordinal.outpoint)}
             isSweepable={sweepableOutpoints.has(ordinal.outpoint)}
             onToggle={() => onToggle(ordinal.outpoint)}
-            contentUrl={services.ordfs.getContentUrl(ordinal.outpoint)}
+            contentUrl={services.ordfs.getContentUrl(ordinal.metadata?.origin ?? ordinal.outpoint)}
           />
         ))}
       </div>
