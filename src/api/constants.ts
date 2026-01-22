@@ -31,7 +31,7 @@ export const LOCK_PREFIX = "20d37f4de0d1c735b4d51a5572df0f3d9104d1d9e99db8694fdd
 export const LOCK_SUFFIX = "88ac7e7601207f75a9011488";
 
 // Protocol IDs
-export const ONESAT_PROTOCOL: [0 | 1 | 2, string] = [1, "1sat"];
+export const ONESAT_PROTOCOL: [0 | 1 | 2, string] = [1, "onesat"];
 export const MESSAGE_SIGNING_PROTOCOL: [0 | 1 | 2, string] = [1, "message signing"];
 
 // Constants
