@@ -1505,7 +1505,7 @@ export default function SweepPage() {
         const ordinalInputs: SweepOrdinalInput[] = sweepInputs.map((input, i) => ({
           ...input,
           contentType: (items[i] as OrdinalWithMetadata).metadata?.contentType,
-          origin: (items[i] as OrdinalWithMetadata).metadata?.origin?.outpoint,
+          origin: (items[i] as OrdinalWithMetadata).metadata?.origin,
         }));
 
         const result = await sweepOrdinals.execute(ctx, {
