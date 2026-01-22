@@ -1568,7 +1568,7 @@ export default function SweepPage() {
 
     try {
       const { items, sweepType } = dialogState;
-      const ctx = createContext(wallet.wallet, {
+      const ctx = createContext(wallet.rawWallet, {
         services,
         chain: "main",
       });
@@ -1615,7 +1615,7 @@ export default function SweepPage() {
 
         if (result.txid) {
           addLog(`Success: ${result.txid}`);
-          const listResult = await wallet.wallet.listOutputs(
+          const listResult = await wallet.rawWallet.listOutputs(
             { basket: FUNDING_BASKET, limit: 10000 },
             window.location.origin
           );

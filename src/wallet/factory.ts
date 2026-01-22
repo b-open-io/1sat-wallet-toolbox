@@ -59,6 +59,8 @@ export interface WebWalletConfig {
 export interface WebWalletResult {
   /** Wallet instance with permission management */
   wallet: WalletPermissionsManager;
+  /** Underlying wallet without permission checks (for trusted contexts like sweep-ui) */
+  rawWallet: Wallet;
   /** 1Sat services for API access */
   services: OneSatServices;
   /** Monitor for transaction lifecycle (not started - call monitor.startTasks() when ready) */
@@ -309,6 +311,7 @@ export async function createWebWallet(
 
   return {
     wallet,
+    rawWallet: underlyingWallet,
     services: oneSatServices,
     monitor,
     destroy,
