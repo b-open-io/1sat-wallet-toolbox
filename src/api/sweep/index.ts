@@ -7,11 +7,13 @@
 import {
   P2PKH,
   PrivateKey,
+  PublicKey,
   Transaction,
   type CreateActionOutput,
 } from "@bsv/sdk";
 import type { OneSatContext, Skill } from "../skills/types";
 import type { IndexedOutput } from "../../services/types";
+import { ONESAT_PROTOCOL } from "../constants";
 import type {
   SweepBsvRequest,
   SweepBsvResponse,
@@ -363,9 +365,9 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
       // Build outputs - one per ordinal, each 1 sat to derived address
       const outputs: CreateActionOutput[] = [];
       for (const input of inputs) {
-        // Derive a unique public key for this ordinal
+        // Derive a unique public key for this ordinal using the input outpoint as keyID
         const pubKeyResult = await ctx.wallet.getPublicKey({
-          protocolID: [1, "ordinal"],
+          protocolID: ONESAT_PROTOCOL,
           keyID: input.outpoint,
           forSelf: true,
         });
@@ -375,27 +377,37 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         }
 
         // Create P2PKH locking script from derived public key
-        const derivedAddress = pubKeyResult.publicKey;
+        const derivedAddress = PublicKey.fromString(pubKeyResult.publicKey).toAddress();
         const lockingScript = new P2PKH().lock(derivedAddress);
+
+        // Build tags following ordinals API pattern
+        const tags: string[] = [];
+        if (input.contentType) tags.push(`type:${input.contentType}`);
+        if (input.origin) tags.push(`origin:${input.origin}`);
 
         outputs.push({
           lockingScript: lockingScript.toHex(),
           satoshis: 1,
           outputDescription: `Ordinal ${input.origin ?? input.outpoint}`,
           basket: "1sat",
-          tags: ["insc", "origin"],
+          tags,
+          customInstructions: JSON.stringify({
+            protocolID: ONESAT_PROTOCOL,
+            keyID: input.outpoint,
+          }),
         });
       }
 
       const beefData = firstBeef.toBinary();
 
       // Create action to get signable transaction
+      // CRITICAL: randomizeOutputs must be false to preserve ordinal satoshi positions
       const createResult = await ctx.wallet.createAction({
         description: `Sweep ${inputs.length} ordinal${inputs.length !== 1 ? "s" : ""}`,
         inputBEEF: beefData,
         inputs: inputDescriptors,
         outputs,
-        options: { signAndProcess: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -408,8 +420,6 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
 
       // Sign each input with our external key
       const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
-
-      console.log(`[sweepOrdinals] Transaction has ${tx.inputs.length} inputs, ${tx.outputs.length} outputs`);
 
       // Build a set of outpoints we control
       const ourOutpoints = new Set(

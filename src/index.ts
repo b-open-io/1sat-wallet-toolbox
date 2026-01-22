@@ -31,3 +31,6 @@ export * from "./cwi";
 
 // Wallet factory for creating 1Sat web wallets
 export * from "./wallet";
+
+// Backup providers for file-based wallet backup/restore
+export * from "./backup";

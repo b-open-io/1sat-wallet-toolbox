@@ -433,7 +433,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
           inputDescription: "Token input",
         })),
         outputs,
-        options: { signAndProcess: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -589,7 +589,7 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
           },
         ],
         outputs,
-        options: { signAndProcess: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
       if ("error" in createResult && createResult.error) {

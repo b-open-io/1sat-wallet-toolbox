@@ -1163,96 +1163,135 @@ function DestinationLogs({
 // SWEEP CONFIRMATION MODAL
 // ============================================================================
 
-function SweepConfirmationModal({
-  dialogState,
+function BsvSweepConfirmation({
+  items,
   price,
   onCancel,
   onConfirm,
   sweeping,
 }: {
-  dialogState: Extract<DialogState, { type: "preview" }>;
+  items: IndexedOutput[];
   price: number;
   onCancel: () => void;
   onConfirm: () => void;
   sweeping: boolean;
 }) {
-  const isOrdinals = dialogState.sweepType === "ordinals";
-
-  const { totalSats, txCount, estFees, netAmount } = useMemo(() => {
-    const total = dialogState.items.reduce(
-      (sum, i) => sum + (i.satoshis ?? 0),
-      0
-    );
-    const count = Math.ceil(dialogState.items.length / 100);
-    const estFeePerTx = isOrdinals ? 300 : 500;
-    const fees = count * estFeePerTx;
-    const net = "amount" in dialogState && dialogState.amount
-      ? Math.min(dialogState.amount, total - fees)
-      : total - fees;
-    return { totalSats: total, txCount: count, estFees: fees, netAmount: net };
-  }, [dialogState, isOrdinals]);
-
-  const accentClass = isOrdinals ? "text-primary" : "text-chart-2";
-  const bgClass = isOrdinals ? "bg-primary" : "bg-chart-2";
-  const borderClass = isOrdinals ? "border-primary/40" : "border-chart-2/40";
+  const totalSats = useMemo(
+    () => items.reduce((sum, i) => sum + (i.satoshis ?? 0), 0),
+    [items]
+  );
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[1000] p-5">
-      <Card className={cn("w-full max-w-[420px] p-7 bg-gradient-to-br from-card to-black rounded-[20px]", borderClass)}>
-        <h2 className={cn("m-0 mb-2 text-center text-[22px]", accentClass)}>
+      <Card className="w-full max-w-[420px] p-7 bg-gradient-to-br from-card to-black rounded-[20px] border-chart-2/40">
+        <h2 className="m-0 mb-2 text-center text-[22px] text-chart-2">
           Confirm Sweep
         </h2>
         <p className="m-0 mb-6 text-center text-sm text-muted-foreground">
-          Sweeping <strong className="text-foreground">{dialogState.items.length}</strong>{" "}
-          {isOrdinals
-            ? `Ordinal${dialogState.items.length !== 1 ? "s" : ""}`
-            : `Funding UTXO${dialogState.items.length !== 1 ? "s" : ""}`}
+          Sweeping <strong className="text-foreground">{items.length}</strong>{" "}
+          Funding UTXO{items.length !== 1 ? "s" : ""}
         </p>
 
         <div className="mb-6">
-          {isOrdinals ? (
-            <div className={cn("text-center text-3xl font-bold", accentClass)}>
-              {dialogState.items.length} Ordinal{dialogState.items.length !== 1 ? "s" : ""}
-            </div>
-          ) : (
-            <BalanceDisplay
-              sats={totalSats}
-              price={price}
-              size="large"
-              align="center"
-            />
-          )}
+          <BalanceDisplay
+            sats={totalSats}
+            price={price}
+            size="large"
+            align="center"
+          />
         </div>
 
-        <div className="p-4 bg-black/30 rounded-xl mb-6">
-          <div className="text-[11px] text-muted-foreground mb-3 uppercase tracking-wider">
-            Transaction Plan
-          </div>
-          <div className="text-[13px] leading-8">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Transactions</span>
-              <span>{txCount} (max 100 inputs each)</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Est. fees</span>
-              <span className="text-chart-4">
-                ~{estFees.toLocaleString()} sats
-              </span>
-            </div>
-            {!isOrdinals && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Net to wallet</span>
-                <span className="text-chart-2">
-                  ~{netAmount.toLocaleString()} sats
-                  {price > 0 ? (
-                    <span className="text-muted-foreground">
-                      {" "}
-                      ({formatUsd(netAmount, price)})
-                    </span>
-                  ) : null}
-                </span>
-              </div>
+        <div className="flex gap-3">
+          <Button
+            type="button"
+            onClick={onCancel}
+            disabled={sweeping}
+            variant="outline"
+            className="flex-1"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={onConfirm}
+            disabled={sweeping}
+            className={cn(
+              "flex-1 gap-2",
+              !sweeping && "bg-chart-2 hover:bg-chart-2/90 text-black"
             )}
+          >
+            {sweeping ? (
+              <>
+                <Spinner size={16} className="text-muted-foreground" />
+                Sweeping...
+              </>
+            ) : (
+              "Confirm Sweep"
+            )}
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function OrdinalSweepConfirmation({
+  items,
+  services,
+  onCancel,
+  onConfirm,
+  sweeping,
+}: {
+  items: OrdinalWithMetadata[];
+  services: OneSatServices;
+  onCancel: () => void;
+  onConfirm: () => void;
+  sweeping: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[1000] p-5">
+      <Card className="w-full max-w-[500px] p-7 bg-gradient-to-br from-card to-black rounded-[20px] border-primary/40">
+        <h2 className="m-0 mb-2 text-center text-[22px] text-primary">
+          Confirm Sweep
+        </h2>
+        <p className="m-0 mb-4 text-center text-sm text-muted-foreground">
+          Sweeping <strong className="text-foreground">{items.length}</strong>{" "}
+          Ordinal{items.length !== 1 ? "s" : ""} to your wallet
+        </p>
+
+        {/* Ordinal thumbnails grid */}
+        <div className="mb-6 max-h-[300px] overflow-y-auto">
+          <div className="grid grid-cols-4 gap-2">
+            {items.map((ordinal) => {
+              const contentType = ordinal.metadata?.contentType ?? "";
+              const isImage = isImageType(contentType);
+              const contentUrl = services.ordfs.getContentUrl(
+                ordinal.metadata?.origin ?? ordinal.outpoint
+              );
+
+              return (
+                <div
+                  key={ordinal.outpoint}
+                  className="aspect-square rounded-lg overflow-hidden bg-black/30 flex items-center justify-center border border-primary/20"
+                >
+                  {isImage ? (
+                    <img
+                      src={contentUrl}
+                      alt="Ordinal"
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="text-center p-1">
+                      <span className="text-muted-foreground text-lg">📄</span>
+                      <div className="text-[8px] text-muted-foreground truncate">
+                        {contentType.split("/")[1] || "file"}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -1272,7 +1311,7 @@ function SweepConfirmationModal({
             disabled={sweeping}
             className={cn(
               "flex-1 gap-2",
-              !sweeping && `${bgClass} hover:${bgClass}/90 text-black`
+              !sweeping && "bg-primary hover:bg-primary/90 text-black"
             )}
           >
             {sweeping ? (
@@ -1287,6 +1326,44 @@ function SweepConfirmationModal({
         </div>
       </Card>
     </div>
+  );
+}
+
+function SweepConfirmationModal({
+  dialogState,
+  price,
+  services,
+  onCancel,
+  onConfirm,
+  sweeping,
+}: {
+  dialogState: Extract<DialogState, { type: "preview" }>;
+  price: number;
+  services: OneSatServices;
+  onCancel: () => void;
+  onConfirm: () => void;
+  sweeping: boolean;
+}) {
+  if (dialogState.sweepType === "ordinals") {
+    return (
+      <OrdinalSweepConfirmation
+        items={dialogState.items as OrdinalWithMetadata[]}
+        services={services}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+        sweeping={sweeping}
+      />
+    );
+  }
+
+  return (
+    <BsvSweepConfirmation
+      items={dialogState.items}
+      price={price}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      sweeping={sweeping}
+    />
   );
 }
 
@@ -1697,6 +1774,7 @@ export default function SweepPage() {
         <SweepConfirmationModal
           dialogState={dialogState}
           price={bsvPrice}
+          services={services}
           onCancel={handleCancelPreview}
           onConfirm={handleConfirmSweep}
           sweeping={sweeping}

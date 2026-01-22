@@ -7,13 +7,7 @@
 import { P2PKH, PublicKey, Script, Utils } from "@bsv/sdk";
 import { Inscription } from "@bopen-io/templates";
 import type { Skill } from "../skills/types";
-import { MAX_INSCRIPTION_BYTES, ORDINALS_BASKET } from "../constants";
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const ORDINAL_PROTOCOL: [0 | 1 | 2, string] = [1, "ordinal"];
+import { MAX_INSCRIPTION_BYTES, ORDINALS_BASKET, ONESAT_PROTOCOL } from "../constants";
 
 // ============================================================================
 // Types
@@ -85,7 +79,7 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
 
       const keyID = Date.now().toString();
       const { publicKey } = await ctx.wallet.getPublicKey({
-        protocolID: ORDINAL_PROTOCOL,
+        protocolID: ONESAT_PROTOCOL,
         keyID,
         counterparty: "self",
         forSelf: true,
@@ -104,7 +98,7 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
             basket: ORDINALS_BASKET,
             tags: [`type:${input.contentType}`],
             customInstructions: JSON.stringify({
-              protocolID: ORDINAL_PROTOCOL,
+              protocolID: ONESAT_PROTOCOL,
               keyID,
             }),
           },

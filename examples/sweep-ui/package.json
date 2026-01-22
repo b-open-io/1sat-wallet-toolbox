@@ -10,7 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@1sat/wallet-toolbox": "^0.0.22",
+    "@1sat/wallet-toolbox": "^0.0.23",
     "@bsv/sdk": "^1.10.1",
     "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@^1.7.20-idb-fix.15",
     "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.15",

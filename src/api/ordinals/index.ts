@@ -22,14 +22,7 @@ import {
 } from "@bsv/sdk";
 import { OrdLock } from "@bopen-io/templates";
 import type { Skill, OneSatContext } from "../skills/types";
-import { ORDINALS_BASKET, ORDLOCK_PREFIX, ORDLOCK_SUFFIX } from "../constants";
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const ORDINAL_PROTOCOL: [0 | 1 | 2, string] = [1, "ordinal"];
-const ORDINAL_LISTING_PROTOCOL: [0 | 1 | 2, string] = [1, "ordinal listing"];
+import { ORDINALS_BASKET, ORDLOCK_PREFIX, ORDLOCK_SUFFIX, ONESAT_PROTOCOL } from "../constants";
 
 // ============================================================================
 // Types
@@ -85,7 +78,7 @@ async function deriveCancelAddressInternal(
   outpoint: string,
 ): Promise<string> {
   const result = await ctx.wallet.getPublicKey({
-    protocolID: ORDINAL_LISTING_PROTOCOL,
+    protocolID: ONESAT_PROTOCOL,
     keyID: outpoint,
     forSelf: true,
   });
@@ -189,7 +182,7 @@ export async function buildTransferOrdinal(
   let recipientAddress: string;
   if (counterparty) {
     const { publicKey } = await ctx.wallet.getPublicKey({
-      protocolID: ORDINAL_PROTOCOL,
+      protocolID: ONESAT_PROTOCOL,
       keyID: outpoint,
       counterparty,
       forSelf: false,
@@ -270,7 +263,7 @@ export async function buildListOrdinal(
         basket: ORDINALS_BASKET,
         tags,
         customInstructions: JSON.stringify({
-          protocolID: ORDINAL_LISTING_PROTOCOL,
+          protocolID: ONESAT_PROTOCOL,
           keyID: outpoint,
         }),
       },
@@ -371,7 +364,10 @@ export const transferOrdinal: Skill<TransferOrdinalRequest, OrdinalOperationResp
         return params;
       }
 
-      const result = await ctx.wallet.createAction(params);
+      const result = await ctx.wallet.createAction({
+        ...params,
+        options: { randomizeOutputs: false },
+      });
 
       if (!result.txid) {
         return { error: "no-txid-returned" };
@@ -408,7 +404,10 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
         return params;
       }
 
-      const result = await ctx.wallet.createAction(params);
+      const result = await ctx.wallet.createAction({
+        ...params,
+        options: { randomizeOutputs: false },
+      });
 
       if (!result.txid) {
         return { error: "no-txid-returned" };
@@ -492,7 +491,7 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
             customInstructions: JSON.stringify({ protocolID, keyID }),
           },
         ],
-        options: { signAndProcess: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -630,7 +629,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
       }
 
       const { publicKey } = await ctx.wallet.getPublicKey({
-        protocolID: ORDINAL_PROTOCOL,
+        protocolID: ONESAT_PROTOCOL,
         keyID: outpoint,
         counterparty: "self",
         forSelf: true,
@@ -654,7 +653,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         basket: ORDINALS_BASKET,
         tags: [`type:${contentType}`, `origin:${origin}`],
         customInstructions: JSON.stringify({
-          protocolID: ORDINAL_PROTOCOL,
+          protocolID: ONESAT_PROTOCOL,
           keyID: outpoint,
         }),
       });
@@ -693,7 +692,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
           },
         ],
         outputs,
-        options: { signAndProcess: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
       if ("error" in createResult && createResult.error) {
