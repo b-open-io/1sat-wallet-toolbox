@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.22] - 2026-01-22
+
+### Added
+
+- **sweepOrdinals skill** - New skill to sweep ordinals from external wallets into BRC-100 wallets
+  - Each ordinal transferred to derived address via wallet key derivation
+  - Outputs tagged and placed in `1sat` basket
+- **Ordinal sweep types** - `SweepOrdinalInput`, `SweepOrdinalsRequest`, `SweepOrdinalsResponse`
+- **sweep-ui ordinals section** - UI for browsing, selecting, and sweeping ordinals
+  - Pagination for ordinal outputs
+  - Metadata lookup via ordfs API
+  - Thumbnail display for image ordinals
+  - Multi-select with sweep confirmation
+
 ## [0.0.10] - 2026-01-14
 
 ### Added

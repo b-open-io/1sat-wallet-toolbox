@@ -31,3 +31,29 @@ export interface SweepBsvResponse {
   /** Error message if failed */
   error?: string;
 }
+
+/** Input for ordinal sweep operations */
+export interface SweepOrdinalInput extends SweepInput {
+  /** Content type from ordfs metadata */
+  contentType?: string;
+  /** Origin outpoint for tracking */
+  origin?: string;
+}
+
+/** Request to sweep ordinals */
+export interface SweepOrdinalsRequest {
+  /** Ordinal UTXOs to sweep */
+  inputs: SweepOrdinalInput[];
+  /** WIF private key controlling the inputs */
+  wif: string;
+}
+
+/** Response from ordinal sweep operation */
+export interface SweepOrdinalsResponse {
+  /** Transaction ID if successful */
+  txid?: string;
+  /** BEEF (transaction with validity proof) */
+  beef?: number[];
+  /** Error message if failed */
+  error?: string;
+}
