@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { WalletInterface } from "@bsv/sdk";
 import { PrivateKey } from "@bsv/sdk";
 import {
   OneSatServices,
@@ -9,19 +10,21 @@ import {
   sweepOrdinals,
   prepareSweepInputs,
   createContext,
-  createWebWallet,
-  FUNDING_BASKET,
   type IndexedOutput,
-  type WebWalletConfig,
-  type WebWalletResult,
   type OrdfsMetadata,
   type SweepOrdinalInput,
 } from "@1sat/wallet-toolbox";
+
+// Declare window.CWI from yours-wallet extension
+declare global {
+  interface Window {
+    CWI?: WalletInterface;
+  }
+}
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { DebugPanel } from "@/components/DebugPanel";
 
 const services = new OneSatServices("main");
 
@@ -64,28 +67,6 @@ function parseWif(
 // CONSTANTS & TYPES
 // ============================================================================
 
-const TEST_PERMISSIONS_CONFIG = {
-  seekProtocolPermissionsForSigning: false,
-  seekProtocolPermissionsForEncrypting: false,
-  seekProtocolPermissionsForHMAC: false,
-  seekPermissionsForKeyLinkageRevelation: false,
-  seekPermissionsForPublicKeyRevelation: false,
-  seekPermissionsForIdentityKeyRevelation: false,
-  seekPermissionsForIdentityResolution: false,
-  seekBasketInsertionPermissions: false,
-  seekBasketRemovalPermissions: false,
-  seekBasketListingPermissions: false,
-  seekPermissionWhenApplyingActionLabels: false,
-  seekPermissionWhenListingActionsByLabel: false,
-  seekCertificateDisclosurePermissions: false,
-  seekCertificateAcquisitionPermissions: false,
-  seekCertificateRelinquishmentPermissions: false,
-  seekCertificateListingPermissions: false,
-  encryptWalletMetadata: false,
-  seekSpendingPermissions: false,
-  seekGroupedPermission: false,
-  differentiatePrivilegedOperations: false,
-};
 
 type DialogState =
   | { type: "idle" }
@@ -127,6 +108,21 @@ function getOrdinalOutputs(outputs: IndexedOutput[]): IndexedOutput[] {
  */
 function isImageType(contentType: string): boolean {
   return contentType.startsWith("image/");
+}
+
+/**
+ * Extract name from OrdfsMetadata map data
+ * Name can be in map.name or map.subTypeData.name
+ */
+function getOrdinalName(metadata?: OrdfsMetadata): string | undefined {
+  if (!metadata?.map) return undefined;
+  const map = metadata.map;
+  if (typeof map.name === "string" && map.name) return map.name;
+  if (map.subTypeData && typeof map.subTypeData === "object") {
+    const subData = map.subTypeData as Record<string, unknown>;
+    if (typeof subData.name === "string" && subData.name) return subData.name;
+  }
+  return undefined;
 }
 
 /** Ordinal output with fetched metadata */
@@ -271,119 +267,101 @@ function Panel({
 // CUSTOM HOOKS
 // ============================================================================
 
-interface DestinationWalletState {
-  destWif: string;
-  setDestWif: (wif: string) => void;
-  walletStatus: string;
-  walletBalance: number | null;
-  setWalletBalance: (balance: number | null) => void;
-  monitorLogs: string[];
+type CWIStatus = "checking" | "not-installed" | "not-authenticated" | "authenticating" | "ready" | "error";
+
+interface CWIWalletState {
+  status: CWIStatus;
+  wallet: WalletInterface | null;
+  logs: string[];
   addLog: (msg: string) => void;
   clearLogs: () => void;
-  wallet: WebWalletResult | null;
-  hasWallet: boolean;
+  connect: () => void;
 }
 
-function useDestinationWallet(svc: OneSatServices): DestinationWalletState {
-  const [destWif, setDestWif] = useState("");
-  const [walletStatus, setWalletStatus] = useState("Not initialized");
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [monitorLogs, setMonitorLogs] = useState<string[]>([]);
-  const [wallet, setWallet] = useState<WebWalletResult | null>(null);
-  const walletRef = useRef<WebWalletResult | null>(null);
+function useCWIWallet(): CWIWalletState {
+  const [status, setStatus] = useState<CWIStatus>("checking");
+  const [wallet, setWallet] = useState<WalletInterface | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toISOString().substring(11, 23);
-    setMonitorLogs((prev) => [...prev, `[${timestamp}] ${msg}`]);
+    setLogs((prev) => [...prev, `[${timestamp}] ${msg}`]);
   }, []);
 
-  const clearLogs = useCallback(() => setMonitorLogs([]), []);
+  const clearLogs = useCallback(() => setLogs([]), []);
 
+  // Check for CWI on mount with retries (extension service worker may not be ready immediately)
   useEffect(() => {
-    const initWallet = async () => {
-      if (walletRef.current) {
-        await walletRef.current.destroy();
-        walletRef.current = null;
-        setWallet(null);
+    let cancelled = false;
+
+    const checkCWI = async () => {
+      const delays = [200, 500, 1000, 2000];
+
+      for (const delay of delays) {
+        if (cancelled) return;
+        await new Promise((r) => setTimeout(r, delay));
+        if (!window.CWI) continue;
+
+        try {
+          const { authenticated } = await window.CWI.isAuthenticated({});
+          if (cancelled) return;
+
+          if (authenticated) {
+            setWallet(window.CWI);
+            setStatus("ready");
+            addLog("Yours Wallet connected");
+            return;
+          }
+        } catch {
+          // Service worker not ready yet, retry
+        }
       }
 
-      if (!destWif.trim()) {
-        setWalletStatus("Not initialized");
-        setWalletBalance(null);
-        return;
-      }
+      if (cancelled) return;
 
-      try {
-        setWalletStatus("Initializing...");
-        setMonitorLogs([]);
-
-        const config: WebWalletConfig = {
-          privateKey: destWif.trim(),
-          chain: "main",
-          adminOriginator: window.location.origin,
-          permissionsConfig: TEST_PERMISSIONS_CONFIG,
-          remoteStorageUrl: svc.storageUrl,
-          feeModel: { model: "sat/kb", value: 100 },
-        };
-
-        addLog(`Creating wallet with remoteStorageUrl: ${config.remoteStorageUrl}`);
-        const result = await createWebWallet(config);
-        walletRef.current = result;
-        setWallet(result);
-
-        result.monitor.onTransactionBroadcasted = async (txResult: {
-          txid: string;
-          status: string;
-        }) => {
-          addLog(`BROADCASTED: ${txResult.txid}`);
-        };
-
-        result.monitor.onTransactionProven = async (status: { txid: string }) => {
-          addLog(`PROVEN: ${status.txid}`);
-        };
-
-        addLog("Starting monitor...");
-        result.monitor.startTasks().catch((err: unknown) => {
-          addLog(`Monitor error: ${err instanceof Error ? err.message : String(err)}`);
-        });
-
-        setWalletStatus("Ready");
-        addLog("Wallet ready");
-
-        const listResult = await result.wallet.listOutputs(
-          { basket: FUNDING_BASKET, limit: 10000 },
-          window.location.origin
-        );
-        const satoshis = listResult.outputs.reduce(
-          (sum: number, o: { satoshis: number }) => sum + o.satoshis,
-          0
-        );
-        setWalletBalance(satoshis);
-        addLog(`Balance: ${satoshis.toLocaleString()} sats`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        setWalletStatus(`Error: ${msg}`);
-        setMonitorLogs((prev) => [...prev, `[ERROR] ${msg}`]);
+      if (!window.CWI) {
+        setStatus("not-installed");
+      } else {
+        setStatus("not-authenticated");
       }
     };
 
-    initWallet();
-    return () => {
-      walletRef.current?.destroy();
-    };
-  }, [destWif, addLog, svc.storageUrl]);
+    checkCWI();
+    return () => { cancelled = true; };
+  }, [addLog]);
+
+  const connect = useCallback(async () => {
+    if (!window.CWI) {
+      setStatus("not-installed");
+      return;
+    }
+
+    setStatus("authenticating");
+    addLog("Waiting for authentication...");
+
+    try {
+      const { authenticated } = await window.CWI.waitForAuthentication({});
+      if (authenticated) {
+        setWallet(window.CWI);
+        setStatus("ready");
+        addLog("Yours Wallet connected");
+      } else {
+        setStatus("not-authenticated");
+        addLog("Authentication declined");
+      }
+    } catch (err) {
+      addLog(`Auth error: ${err instanceof Error ? err.message : String(err)}`);
+      setStatus("error");
+    }
+  }, [addLog]);
 
   return {
-    destWif,
-    setDestWif,
-    walletStatus,
-    walletBalance,
-    setWalletBalance,
-    monitorLogs,
+    status,
+    wallet,
+    logs,
     addLog,
     clearLogs,
-    wallet,
-    hasWallet: wallet !== null,
+    connect,
   };
 }
 
@@ -502,6 +480,7 @@ function OrdinalCard({
   const isBsv20 = contentType === "application/bsv-20";
   const hasMetadata = !!ordinal.metadata;
   const hasError = !!ordinal.metadataError;
+  const name = getOrdinalName(ordinal.metadata);
 
   const thumbnailUrl = isImage ? contentUrl : null;
 
@@ -577,10 +556,16 @@ function OrdinalCard({
         )}
       </div>
 
-      {/* Outpoint (truncated) */}
-      <div className="mt-1 text-[9px] text-muted-foreground truncate font-mono">
-        {ordinal.outpoint.substring(0, 8)}...
-      </div>
+      {/* Name or Outpoint */}
+      {name ? (
+        <div className="mt-1 text-[10px] text-foreground truncate font-medium" title={name}>
+          {name}
+        </div>
+      ) : (
+        <div className="mt-1 text-[9px] text-muted-foreground truncate font-mono">
+          {ordinal.outpoint.substring(0, 8)}...
+        </div>
+      )}
     </div>
   );
 }
@@ -712,7 +697,7 @@ function OrdinalsSection({
 
       {!hasWallet && (
         <div className="mt-3 p-2 bg-chart-4/10 rounded-lg text-xs text-chart-4 text-center">
-          ⚠ Enter destination wallet WIF to enable sweep
+          Connect Yours Wallet to enable sweep
         </div>
       )}
     </div>
@@ -849,7 +834,7 @@ function SourceResultsState({
 
               {!hasWallet && (
                 <div className="mt-3 p-2 bg-chart-4/10 rounded-lg text-xs text-chart-4 text-center">
-                  ⚠ Enter destination wallet WIF to enable sweep
+                  Connect Yours Wallet to enable sweep
                 </div>
               )}
             </div>
@@ -1042,120 +1027,107 @@ function SourceContentPreview({
 }
 
 // ============================================================================
-// DESTINATION COMPONENTS
+// CWI WALLET COMPONENTS
 // ============================================================================
 
-function DestinationWalletInput({
-  destWif,
-  onDestWifChange,
-  walletStatus,
-  walletBalance,
-  price,
-}: {
-  destWif: string;
-  onDestWifChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  walletStatus: string;
-  walletBalance: number | null;
-  price: number;
-}) {
-  const statusColorClass =
-    walletStatus === "Ready"
-      ? "text-chart-2"
-      : walletStatus.startsWith("Error")
-        ? "text-destructive"
-        : "text-chart-4";
-
-  const statusBgClass =
-    walletStatus === "Ready"
-      ? "bg-chart-2 shadow-sm"
-      : walletStatus.startsWith("Error")
-        ? "bg-destructive shadow-destructive/50"
-        : "bg-chart-4 shadow-sm";
-
-  return (
-    <div className="mt-4">
-      <p className="text-[13px] text-muted-foreground mb-4">
-        Enter the WIF private key of your BRC-100 wallet to receive swept funds
-      </p>
-      <Input
-        type="password"
-        placeholder="WIF private key (starts with K, L, or 5)"
-        value={destWif}
-        onChange={onDestWifChange}
-        className="mb-4 font-mono bg-black/30"
-      />
-
-      <div className="p-4 bg-black/20 rounded-[10px]">
-        <div className="flex justify-between items-start">
-          <div>
-            <div className="text-[11px] text-muted-foreground mb-1 uppercase tracking-wider">
-              Status
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={cn("w-2 h-2 rounded-full shadow-md", statusBgClass)} />
-              <span className={cn("text-sm font-medium", statusColorClass)}>
-                {walletStatus}
-              </span>
-            </div>
-          </div>
-          {walletBalance !== null ? (
-            <BalanceDisplay
-              sats={walletBalance}
-              price={price}
-              label="Balance"
-              size="small"
-              align="right"
-            />
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DestinationLogs({
+function CWIWalletStatus({
+  status,
   logs,
-  onClear,
+  onConnect,
+  onClearLogs,
 }: {
+  status: CWIStatus;
   logs: string[];
-  onClear: () => void;
+  onConnect: () => void;
+  onClearLogs: () => void;
 }) {
-  if (logs.length === 0) return null;
+  const statusDisplay: Record<CWIStatus, { label: string; color: string; bg: string }> = {
+    checking: { label: "Checking...", color: "text-chart-4", bg: "bg-chart-4" },
+    "not-installed": { label: "Extension Not Found", color: "text-destructive", bg: "bg-destructive" },
+    "not-authenticated": { label: "Not Connected", color: "text-chart-4", bg: "bg-chart-4" },
+    authenticating: { label: "Connecting...", color: "text-chart-4", bg: "bg-chart-4" },
+    ready: { label: "Connected", color: "text-chart-2", bg: "bg-chart-2" },
+    error: { label: "Error", color: "text-destructive", bg: "bg-destructive" },
+  };
+
+  const { label, color, bg } = statusDisplay[status];
 
   return (
-    <Card className="mt-0.5 p-5 rounded-t-none border-t-0">
-      <div className="flex justify-between items-center mb-3">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Activity Log
-        </span>
-        <Button
-          type="button"
-          onClick={onClear}
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2.5 text-[11px]"
-        >
-          Clear
-        </Button>
+    <div className="p-4">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          Yours Wallet
+        </div>
+        <span className={cn("w-2 h-2 rounded-full shadow-md", bg)} />
+        <span className={cn("text-sm font-medium", color)}>{label}</span>
       </div>
-      <div className="font-mono text-[11px] max-h-[180px] overflow-y-auto bg-black/30 p-3 rounded-lg leading-relaxed">
-        {logs.map((log, i) => {
-          const isError = log.includes("ERROR") || log.includes("failed");
-          const isSuccess = log.includes("BROADCASTED") || log.includes("Success");
-          const colorClass = isError
-            ? "text-destructive"
-            : isSuccess
-              ? "text-chart-2"
-              : "text-muted-foreground";
 
-          return (
-            <div key={i} className={colorClass}>
-              {log}
-            </div>
-          );
-        })}
-      </div>
-    </Card>
+      {status === "not-installed" && (
+        <div className="p-3 bg-destructive/10 rounded-lg text-sm text-destructive mb-4">
+          Please install the{" "}
+          <a
+            href="https://yours.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline font-medium"
+          >
+            Yours Wallet
+          </a>{" "}
+          Chrome extension to continue.
+        </div>
+      )}
+
+      {status === "not-authenticated" && (
+        <Button onClick={onConnect} className="w-full bg-primary hover:bg-primary/90">
+          Connect Wallet
+        </Button>
+      )}
+
+      {status === "authenticating" && (
+        <div className="flex items-center justify-center gap-2 p-3 bg-black/20 rounded-lg">
+          <Spinner size={16} className="text-primary" />
+          <span className="text-sm text-muted-foreground">
+            Waiting for wallet approval...
+          </span>
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <div className="mt-4">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Activity
+            </span>
+            <Button
+              type="button"
+              onClick={onClearLogs}
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[10px]"
+            >
+              Clear
+            </Button>
+          </div>
+          <div className="font-mono text-[11px] max-h-[120px] overflow-y-auto bg-black/30 p-2 rounded-lg leading-relaxed">
+            {logs.map((log, i) => {
+              const isError = log.includes("ERROR") || log.includes("failed") || log.includes("Error");
+              const isSuccess = log.includes("Success") || log.includes("connected");
+              const colorClass = isError
+                ? "text-destructive"
+                : isSuccess
+                  ? "text-chart-2"
+                  : "text-muted-foreground";
+
+              return (
+                <div key={i} className={colorClass}>
+                  {log}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1165,12 +1137,14 @@ function DestinationLogs({
 
 function BsvSweepConfirmation({
   items,
+  amount,
   price,
   onCancel,
   onConfirm,
   sweeping,
 }: {
   items: IndexedOutput[];
+  amount?: number;
   price: number;
   onCancel: () => void;
   onConfirm: () => void;
@@ -1180,6 +1154,7 @@ function BsvSweepConfirmation({
     () => items.reduce((sum, i) => sum + (i.satoshis ?? 0), 0),
     [items]
   );
+  const sweepSats = amount ?? totalSats;
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[1000] p-5">
@@ -1188,13 +1163,15 @@ function BsvSweepConfirmation({
           Confirm Sweep
         </h2>
         <p className="m-0 mb-6 text-center text-sm text-muted-foreground">
-          Sweeping <strong className="text-foreground">{items.length}</strong>{" "}
-          Funding UTXO{items.length !== 1 ? "s" : ""}
+          {amount
+            ? <>Sweeping <strong className="text-foreground">{amount.toLocaleString()} sats</strong> from {items.length} UTXO{items.length !== 1 ? "s" : ""}</>
+            : <>Sweeping <strong className="text-foreground">{items.length}</strong> Funding UTXO{items.length !== 1 ? "s" : ""}</>
+          }
         </p>
 
         <div className="mb-6">
           <BalanceDisplay
-            sats={totalSats}
+            sats={sweepSats}
             price={price}
             size="large"
             align="center"
@@ -1268,25 +1245,33 @@ function OrdinalSweepConfirmation({
               const contentUrl = services.ordfs.getContentUrl(
                 ordinal.metadata?.origin ?? ordinal.outpoint
               );
+              const name = getOrdinalName(ordinal.metadata);
 
               return (
                 <div
                   key={ordinal.outpoint}
-                  className="aspect-square rounded-lg overflow-hidden bg-black/30 flex items-center justify-center border border-primary/20"
+                  className="rounded-lg overflow-hidden bg-black/30 border border-primary/20"
                 >
-                  {isImage ? (
-                    <img
-                      src={contentUrl}
-                      alt="Ordinal"
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="text-center p-1">
-                      <span className="text-muted-foreground text-lg">📄</span>
-                      <div className="text-[8px] text-muted-foreground truncate">
-                        {contentType.split("/")[1] || "file"}
+                  <div className="aspect-square flex items-center justify-center">
+                    {isImage ? (
+                      <img
+                        src={contentUrl}
+                        alt={name || "Ordinal"}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="text-center p-1">
+                        <span className="text-muted-foreground text-lg">📄</span>
+                        <div className="text-[8px] text-muted-foreground truncate">
+                          {contentType.split("/")[1] || "file"}
+                        </div>
                       </div>
+                    )}
+                  </div>
+                  {name && (
+                    <div className="px-1 py-0.5 text-[8px] text-center text-foreground truncate bg-black/40" title={name}>
+                      {name}
                     </div>
                   )}
                 </div>
@@ -1359,6 +1344,7 @@ function SweepConfirmationModal({
   return (
     <BsvSweepConfirmation
       items={dialogState.items}
+      amount={dialogState.amount}
       price={price}
       onCancel={onCancel}
       onConfirm={onConfirm}
@@ -1377,19 +1363,16 @@ export default function SweepPage() {
   const [address, setAddress] = useState("");
   const [dialogState, setDialogState] = useState<DialogState>({ type: "idle" });
 
-  // Destination state (consolidated into hook)
+  // CWI wallet state (yours-wallet extension)
   const {
-    destWif,
-    setDestWif,
-    walletStatus,
-    walletBalance,
-    setWalletBalance,
-    monitorLogs,
+    status: cwiStatus,
+    wallet,
+    logs: cwiLogs,
     addLog,
     clearLogs,
-    wallet,
-    hasWallet,
-  } = useDestinationWallet(services);
+    connect: connectWallet,
+  } = useCWIWallet();
+  const hasWallet = cwiStatus === "ready" && wallet !== null;
   const [destExpanded, setDestExpanded] = useState(false);
 
   // Sweep state
@@ -1525,11 +1508,6 @@ export default function SweepPage() {
     (e: React.ChangeEvent<HTMLInputElement>) => setWif(e.target.value),
     []
   );
-  const handleDestWifChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => setDestWif(e.target.value),
-    [setDestWif]
-  );
-  const handleClearLogs = clearLogs;
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -1568,7 +1546,7 @@ export default function SweepPage() {
 
     try {
       const { items, sweepType } = dialogState;
-      const ctx = createContext(wallet.rawWallet, {
+      const ctx = createContext(wallet, {
         services,
         chain: "main",
       });
@@ -1579,12 +1557,19 @@ export default function SweepPage() {
         const sweepInputs = await prepareSweepInputs(ctx, items);
         addLog(`Prepared ${sweepInputs.length} inputs`);
 
-        // Add metadata to inputs for ordinals
-        const ordinalInputs: SweepOrdinalInput[] = sweepInputs.map((input, i) => ({
-          ...input,
-          contentType: (items[i] as OrdinalWithMetadata).metadata?.contentType,
-          origin: (items[i] as OrdinalWithMetadata).metadata?.origin,
-        }));
+        // Build lockingScript lookup, then map items directly
+        const scripts = new Map(sweepInputs.map((s) => [s.outpoint, s.lockingScript]));
+        const ordinalInputs: SweepOrdinalInput[] = items.map((item) => {
+          const ordinal = item as OrdinalWithMetadata;
+          return {
+            outpoint: item.outpoint,
+            satoshis: item.satoshis ?? 1,
+            lockingScript: scripts.get(item.outpoint) ?? "",
+            contentType: ordinal.metadata?.contentType,
+            origin: ordinal.metadata?.origin,
+            name: getOrdinalName(ordinal.metadata),
+          };
+        });
 
         const result = await sweepOrdinals.execute(ctx, {
           inputs: ordinalInputs,
@@ -1615,16 +1600,6 @@ export default function SweepPage() {
 
         if (result.txid) {
           addLog(`Success: ${result.txid}`);
-          const listResult = await wallet.rawWallet.listOutputs(
-            { basket: FUNDING_BASKET, limit: 10000 },
-            window.location.origin
-          );
-          const satoshis = listResult.outputs.reduce(
-            (sum: number, o: { satoshis: number }) => sum + o.satoshis,
-            0
-          );
-          setWalletBalance(satoshis);
-          addLog(`New balance: ${satoshis.toLocaleString()} sats`);
         } else if (result.error) {
           addLog(`Sweep failed: ${result.error}`);
         }
@@ -1641,7 +1616,7 @@ export default function SweepPage() {
     } finally {
       setSweeping(false);
     }
-  }, [dialogState, wif, wallet, addLog, setWalletBalance]);
+  }, [dialogState, wif, wallet, addLog]);
 
   // Ordinal selection handlers
   const handleToggleOrdinal = useCallback((outpoint: string) => {
@@ -1740,9 +1715,15 @@ export default function SweepPage() {
                 Destination Wallet
               </div>
               <div className="text-xs text-muted-foreground">
-                {walletStatus === "Ready"
-                  ? `Ready • ${walletBalance?.toLocaleString() ?? 0} sats`
-                  : walletStatus}
+                {cwiStatus === "ready"
+                  ? "Connected"
+                  : cwiStatus === "not-installed"
+                    ? "Extension not found"
+                    : cwiStatus === "not-authenticated"
+                      ? "Not connected"
+                      : cwiStatus === "authenticating"
+                        ? "Connecting..."
+                        : "Checking..."}
               </div>
             </div>
           </div>
@@ -1755,22 +1736,18 @@ export default function SweepPage() {
             ▼
           </span>
         </button>
-        {destExpanded ? (
-          <div className="px-5 pb-5">
-            <DestinationWalletInput
-              destWif={destWif}
-              onDestWifChange={handleDestWifChange}
-              walletStatus={walletStatus}
-              walletBalance={walletBalance}
-              price={bsvPrice}
-            />
-            <DestinationLogs logs={monitorLogs} onClear={handleClearLogs} />
-          </div>
-        ) : null}
+        {destExpanded && (
+          <CWIWalletStatus
+            status={cwiStatus}
+            logs={cwiLogs}
+            onConnect={connectWallet}
+            onClearLogs={clearLogs}
+          />
+        )}
       </Card>
 
       {/* Sweep Confirmation Modal */}
-      {dialogState.type === "preview" ? (
+      {dialogState.type === "preview" && (
         <SweepConfirmationModal
           dialogState={dialogState}
           price={bsvPrice}
@@ -1779,10 +1756,7 @@ export default function SweepPage() {
           onConfirm={handleConfirmSweep}
           sweeping={sweeping}
         />
-      ) : null}
-
-      {/* Debug Panel */}
-      <DebugPanel wallet={wallet} addLog={addLog} />
+      )}
     </div>
   );
 }

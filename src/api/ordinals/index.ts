@@ -61,6 +61,8 @@ export interface PurchaseOrdinalRequest {
   contentType?: string;
   /** Optional origin outpoint - looked up from ordfs API if not provided */
   origin?: string;
+  /** Optional name from MAP metadata - looked up from ordfs API if not provided */
+  name?: string;
 }
 
 export interface OrdinalOperationResponse {
@@ -196,12 +198,23 @@ export async function buildTransferOrdinal(
 
   const result = await ctx.wallet.listOutputs({
     basket: ORDINALS_BASKET,
+    includeTags: true,
+    includeCustomInstructions: true,
     include: "locking scripts",
     limit: 10000,
   });
 
-  if (!result.outputs.find((o) => o.outpoint === outpoint)) {
+  const sourceOutput = result.outputs.find((o) => o.outpoint === outpoint);
+  if (!sourceOutput) {
     return { error: "ordinal-not-found" };
+  }
+
+  // Preserve important tags from source output
+  const tags: string[] = [];
+  for (const tag of sourceOutput.tags ?? []) {
+    if (tag.startsWith("type:") || tag.startsWith("origin:") || tag.startsWith("name:")) {
+      tags.push(tag);
+    }
   }
 
   return {
@@ -212,6 +225,12 @@ export async function buildTransferOrdinal(
         lockingScript: new P2PKH().lock(recipientAddress).toHex(),
         satoshis: 1,
         outputDescription: "Ordinal transfer",
+        basket: ORDINALS_BASKET,
+        tags,
+        customInstructions: JSON.stringify({
+          protocolID: ONESAT_PROTOCOL,
+          keyID: outpoint,
+        }),
       },
     ],
   };
@@ -244,6 +263,7 @@ export async function buildListOrdinal(
 
   const typeTag = sourceOutput.tags?.find((t) => t.startsWith("type:"));
   const originTag = sourceOutput.tags?.find((t) => t.startsWith("origin:"));
+  const nameTag = sourceOutput.tags?.find((t) => t.startsWith("name:"));
   const originOutpoint = originTag ? originTag.slice(7) : outpoint;
 
   const cancelAddress = await deriveCancelAddressInternal(ctx, outpoint);
@@ -251,6 +271,7 @@ export async function buildListOrdinal(
 
   const tags: string[] = ["ordlock", `origin:${originOutpoint}`, `price:${price}`];
   if (typeTag) tags.push(typeTag);
+  if (nameTag) tags.push(nameTag);
 
   return {
     description: `List ordinal for ${price} sats`,
@@ -465,12 +486,14 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
 
       const typeTag = listing.tags?.find((t) => t.startsWith("type:"));
       const originTag = listing.tags?.find((t) => t.startsWith("origin:"));
+      const nameTag = listing.tags?.find((t) => t.startsWith("name:"));
 
       const cancelAddress = await deriveCancelAddressInternal(ctx, keyID);
 
       const tags: string[] = [];
       if (typeTag) tags.push(typeTag);
       if (originTag) tags.push(originTag);
+      if (nameTag) tags.push(nameTag);
 
       const createResult = await ctx.wallet.createAction({
         description: "Cancel ordinal listing",
@@ -605,11 +628,18 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
       const [txid, voutStr] = parts;
       const vout = Number.parseInt(voutStr, 10);
 
-      let { contentType, origin } = input;
-      if (!contentType || !origin) {
+      let { contentType, origin, name } = input;
+      if (!contentType || !origin || name === undefined) {
         const metadata = await ctx.services.ordfs.getMetadata(outpoint);
         contentType = contentType ?? metadata.contentType;
         origin = origin ?? metadata.origin ?? outpoint;
+        // Extract name from map.name or map.subTypeData.name
+        if (name === undefined && metadata.map) {
+          const mapName = metadata.map.name;
+          const subTypeData = metadata.map.subTypeData as Record<string, unknown> | undefined;
+          name = (typeof mapName === "string" ? mapName : undefined) ??
+                 (typeof subTypeData?.name === "string" ? subTypeData.name : undefined);
+        }
       }
 
       const beef = await ctx.services.getBeefForTxid(txid);
@@ -646,12 +676,15 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
       }> = [];
 
       const p2pkh = new P2PKH();
+      const purchaseTags = [`type:${contentType}`, `origin:${origin}`];
+      if (name) purchaseTags.push(`name:${name}`);
+
       outputs.push({
         lockingScript: p2pkh.lock(ourOrdAddress).toHex(),
         satoshis: 1,
         outputDescription: "Purchased ordinal",
         basket: ORDINALS_BASKET,
-        tags: [`type:${contentType}`, `origin:${origin}`],
+        tags: purchaseTags,
         customInstructions: JSON.stringify({
           protocolID: ONESAT_PROTOCOL,
           keyID: outpoint,

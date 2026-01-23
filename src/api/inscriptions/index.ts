@@ -88,6 +88,12 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
 
       const lockingScript = buildInscriptionScript(address, input.base64Content, input.contentType);
 
+      // Build tags - type is always included, name from MAP if provided
+      const tags = [`type:${input.contentType}`];
+      if (input.map?.name) {
+        tags.push(`name:${input.map.name}`);
+      }
+
       const result = await ctx.wallet.createAction({
         description: "Create inscription",
         outputs: [
@@ -96,7 +102,7 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
             satoshis: 1,
             outputDescription: "Inscription",
             basket: ORDINALS_BASKET,
-            tags: [`type:${input.contentType}`],
+            tags,
             customInstructions: JSON.stringify({
               protocolID: ONESAT_PROTOCOL,
               keyID,

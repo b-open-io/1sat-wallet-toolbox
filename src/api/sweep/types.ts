@@ -38,6 +38,8 @@ export interface SweepOrdinalInput extends SweepInput {
   contentType?: string;
   /** Origin outpoint for tracking */
   origin?: string;
+  /** Name from MAP metadata */
+  name?: string;
 }
 
 /** Request to sweep ordinals */

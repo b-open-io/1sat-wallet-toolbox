@@ -311,6 +311,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
               lockingScript: { type: "string", description: "Locking script hex" },
               contentType: { type: "string", description: "Content type from metadata" },
               origin: { type: "string", description: "Origin outpoint" },
+              name: { type: "string", description: "Name from MAP metadata" },
             },
             required: ["outpoint", "satoshis", "lockingScript"],
           },
@@ -384,6 +385,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         const tags: string[] = [];
         if (input.contentType) tags.push(`type:${input.contentType}`);
         if (input.origin) tags.push(`origin:${input.origin}`);
+        if (input.name) tags.push(`name:${input.name}`);
 
         outputs.push({
           lockingScript: lockingScript.toHex(),
