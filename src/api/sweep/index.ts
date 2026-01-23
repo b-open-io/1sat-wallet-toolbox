@@ -385,8 +385,6 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         const tags: string[] = [];
         if (input.contentType) tags.push(`type:${input.contentType}`);
         if (input.origin) tags.push(`origin:${input.origin}`);
-        if (input.name) tags.push(`name:${input.name}`);
-
         outputs.push({
           lockingScript: lockingScript.toHex(),
           satoshis: 1,
@@ -396,6 +394,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
           customInstructions: JSON.stringify({
             protocolID: ONESAT_PROTOCOL,
             keyID: input.outpoint,
+            ...(input.name && { name: input.name.slice(0, 64) }),
           }),
         });
       }
