@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.28] - 2026-01-25
+
+### Added
+
+- **sweepBsv21 skill** - Sweep BSV-21 tokens from external wallets into BRC-100 wallets
+- **BSV21_PROTOCOL constant** - Protocol ID for BSV-21 key derivation
+- **BSV21_FEE_SATS constant** - 1000 sat fee for overlay processing
+- **BSV-21 sweep types** - `SweepBsv21Input`, `SweepBsv21Request`, `SweepBsv21Response`
+
+### Changed
+
+- **sendBsv21** - Now includes 1000 sat fee output to overlay fund address
+
 ## [0.0.27] - 2026-01-23
 
 ### Changed

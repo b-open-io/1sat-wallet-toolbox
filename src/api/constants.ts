@@ -33,6 +33,10 @@ export const LOCK_SUFFIX = "88ac7e7601207f75a9011488";
 // Protocol IDs
 export const ONESAT_PROTOCOL: [0 | 1 | 2, string] = [1, "onesat"];
 export const MESSAGE_SIGNING_PROTOCOL: [0 | 1 | 2, string] = [1, "message signing"];
+export const BSV21_PROTOCOL: [0 | 1 | 2, string] = [1, "bsv21"];
+
+// Fee constants
+export const BSV21_FEE_SATS = 1000;
 
 // Constants
 export const MAX_INSCRIPTION_BYTES = 100_000;

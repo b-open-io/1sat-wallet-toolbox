@@ -11,15 +11,19 @@ import {
   Transaction,
   type CreateActionOutput,
 } from "@bsv/sdk";
+import { BSV21 } from "@bopen-io/templates";
 import type { OneSatContext, Skill } from "../skills/types";
 import type { IndexedOutput } from "../../services/types";
-import { ONESAT_PROTOCOL } from "../constants";
+import { ONESAT_PROTOCOL, BSV21_PROTOCOL, BSV21_FEE_SATS, BSV21_BASKET } from "../constants";
+import { deriveFundAddress } from "../../indexers";
 import type {
   SweepBsvRequest,
   SweepBsvResponse,
   SweepInput,
   SweepOrdinalsRequest,
   SweepOrdinalsResponse,
+  SweepBsv21Request,
+  SweepBsv21Response,
 } from "./types";
 
 export * from "./types";
@@ -480,5 +484,214 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
   },
 };
 
+/**
+ * Sweep BSV-21 tokens from external inputs into the destination wallet.
+ *
+ * Consolidates all token inputs into a single output. All inputs must be
+ * for the same tokenId. Creates a fee output to the overlay fund address.
+ */
+export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
+  meta: {
+    name: "sweepBsv21",
+    description:
+      "Sweep BSV-21 tokens from external wallet (via WIF) into the connected wallet",
+    category: "sweep",
+    requiresServices: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputs: {
+          type: "array",
+          description: "Token UTXOs to sweep (must all be same tokenId)",
+          items: {
+            type: "object",
+            properties: {
+              outpoint: { type: "string", description: "Outpoint (txid_vout)" },
+              satoshis: { type: "integer", description: "Satoshis (should be 1)" },
+              lockingScript: { type: "string", description: "Locking script hex" },
+              tokenId: { type: "string", description: "Token ID (txid_vout format)" },
+              amount: { type: "string", description: "Token amount as string" },
+            },
+            required: ["outpoint", "satoshis", "lockingScript", "tokenId", "amount"],
+          },
+        },
+        wif: {
+          type: "string",
+          description: "WIF private key controlling the inputs",
+        },
+      },
+      required: ["inputs", "wif"],
+    },
+  },
+
+  async execute(ctx, request): Promise<SweepBsv21Response> {
+    if (!ctx.services) {
+      return { error: "services-required" };
+    }
+
+    try {
+      const { inputs, wif } = request;
+
+      if (!inputs || inputs.length === 0) {
+        return { error: "no-inputs" };
+      }
+
+      // Validate all inputs have the same tokenId
+      const tokenId = inputs[0].tokenId;
+      if (!inputs.every((i) => i.tokenId === tokenId)) {
+        return { error: "mixed-token-ids" };
+      }
+
+      // Parse WIF
+      const privateKey = PrivateKey.fromWif(wif);
+
+      // Sum all input amounts
+      const totalAmount = inputs.reduce((sum, i) => sum + BigInt(i.amount), 0n);
+      if (totalAmount <= 0n) {
+        return { error: "no-token-amount" };
+      }
+
+      // Fetch BEEF for all input transactions and merge them
+      const txids = [...new Set(inputs.map((i) => i.outpoint.split("_")[0]))];
+      console.log(`[sweepBsv21] Fetching BEEF for ${txids.length} transactions`);
+
+      const firstBeef = await ctx.services.getBeefForTxid(txids[0]);
+      for (let i = 1; i < txids.length; i++) {
+        const additionalBeef = await ctx.services.getBeefForTxid(txids[i]);
+        firstBeef.mergeBeef(additionalBeef);
+      }
+
+      console.log(`[sweepBsv21] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`);
+
+      // Build input descriptors
+      const inputDescriptors = inputs.map((input) => {
+        const [txid, voutStr] = input.outpoint.split("_");
+        return {
+          outpoint: `${txid}.${voutStr}`,
+          inputDescription: `Token input ${input.outpoint}`,
+          unlockingScriptLength: 108,
+          sequenceNumber: 0xffffffff,
+        };
+      });
+
+      // Build outputs
+      const outputs: CreateActionOutput[] = [];
+
+      // 1. Token output (1 sat) - derive key for this token
+      const keyID = `${tokenId}-${Date.now()}`;
+      const pubKeyResult = await ctx.wallet.getPublicKey({
+        protocolID: BSV21_PROTOCOL,
+        keyID,
+        forSelf: true,
+      });
+
+      if (!pubKeyResult.publicKey) {
+        return { error: "failed-to-derive-key" };
+      }
+
+      const derivedAddress = PublicKey.fromString(pubKeyResult.publicKey).toAddress();
+      const p2pkh = new P2PKH();
+      const destinationLockingScript = p2pkh.lock(derivedAddress);
+      const transferScript = BSV21.transfer(tokenId, totalAmount).lock(destinationLockingScript);
+
+      outputs.push({
+        lockingScript: transferScript.toHex(),
+        satoshis: 1,
+        outputDescription: `Sweep ${totalAmount} tokens`,
+        basket: BSV21_BASKET,
+        tags: [`id:${tokenId}`, `amt:${totalAmount}`],
+        customInstructions: JSON.stringify({
+          protocolID: BSV21_PROTOCOL,
+          keyID,
+        }),
+      });
+
+      // 2. Fee output (1000 sats) to overlay fund address
+      const fundAddress = deriveFundAddress(tokenId);
+      outputs.push({
+        lockingScript: p2pkh.lock(fundAddress).toHex(),
+        satoshis: BSV21_FEE_SATS,
+        outputDescription: "Overlay processing fee",
+      });
+
+      const beefData = firstBeef.toBinary();
+
+      // Create action to get signable transaction
+      const createResult = await ctx.wallet.createAction({
+        description: `Sweep ${inputs.length} token UTXO${inputs.length !== 1 ? "s" : ""}`,
+        inputBEEF: beefData,
+        inputs: inputDescriptors,
+        outputs,
+        options: { signAndProcess: false, randomizeOutputs: false },
+      });
+
+      if ("error" in createResult && createResult.error) {
+        return { error: String(createResult.error) };
+      }
+
+      if (!createResult.signableTransaction) {
+        return { error: "no-signable-transaction" };
+      }
+
+      // Sign each input with our external key
+      const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+
+      // Build a set of outpoints we control
+      const ourOutpoints = new Set(
+        inputs.map((input) => {
+          const [txid, vout] = input.outpoint.split("_");
+          return `${txid}.${vout}`;
+        })
+      );
+
+      // Set up P2PKH unlocker on each input we control
+      for (let i = 0; i < tx.inputs.length; i++) {
+        const txInput = tx.inputs[i];
+        const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
+
+        if (ourOutpoints.has(inputOutpoint)) {
+          txInput.unlockingScriptTemplate = p2pkh.unlock(
+            privateKey,
+            "all",
+            true, // anyoneCanPay
+          );
+        }
+      }
+
+      await tx.sign();
+
+      // Extract unlocking scripts for signAction
+      const spends: Record<number, { unlockingScript: string }> = {};
+      for (let i = 0; i < tx.inputs.length; i++) {
+        const txInput = tx.inputs[i];
+        const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
+
+        if (ourOutpoints.has(inputOutpoint)) {
+          spends[i] = { unlockingScript: txInput.unlockingScript?.toHex() ?? "" };
+        }
+      }
+
+      // Complete the action with our signatures
+      const signResult = await ctx.wallet.signAction({
+        reference: createResult.signableTransaction.reference,
+        spends,
+      });
+
+      if ("error" in signResult) {
+        return { error: String(signResult.error) };
+      }
+
+      return {
+        txid: signResult.txid,
+        beef: signResult.tx ? Array.from(signResult.tx) : undefined,
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
+    }
+  },
+};
+
 // Export skills array for registry
-export const sweepSkills = [sweepBsv, sweepOrdinals];
+export const sweepSkills = [sweepBsv, sweepOrdinals, sweepBsv21];

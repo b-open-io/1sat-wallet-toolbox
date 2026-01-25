@@ -18,13 +18,8 @@ import {
 } from "@bsv/sdk";
 import { BSV21, OrdLock } from "@bopen-io/templates";
 import type { Skill, OneSatContext } from "../skills/types";
-import { BSV21_BASKET } from "../constants";
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const BSV21_PROTOCOL: [0 | 1 | 2, string] = [1, "bsv21"];
+import { BSV21_BASKET, BSV21_PROTOCOL, BSV21_FEE_SATS } from "../constants";
+import { deriveFundAddress } from "../../indexers";
 
 // ============================================================================
 // Types
@@ -395,6 +390,14 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         lockingScript: transferScript.toHex(),
         satoshis: 1,
         outputDescription: `Send ${amount} tokens`,
+      });
+
+      // Fee output to overlay fund address
+      const fundAddress = deriveFundAddress(tokenId);
+      outputs.push({
+        lockingScript: p2pkh.lock(fundAddress).toHex(),
+        satoshis: BSV21_FEE_SATS,
+        outputDescription: "Overlay processing fee",
       });
 
       const change = totalIn - amount;
