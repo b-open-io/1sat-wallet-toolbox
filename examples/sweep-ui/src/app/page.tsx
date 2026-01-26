@@ -1826,20 +1826,20 @@ export default function SweepPage() {
     }));
     setTokenBalances(initial);
 
-    // Fetch active token IDs from overlay, then validate
+    // Fetch active tokens with metadata from overlay, then validate
     (async () => {
-      // Get active BSV-21 topic managers from overlay
-      let activeTokenIds: Set<string>;
+      // Get active BSV-21 tokens with metadata from topic managers
+      let tokenMetadata: Map<string, { symbol?: string; icon?: string }>;
       try {
-        const ids = await services.overlay.getActiveBsv21TokenIds();
-        activeTokenIds = new Set(ids);
+        const tokens = await services.overlay.getActiveBsv21Tokens();
+        tokenMetadata = new Map(tokens.map((t) => [t.tokenId, { symbol: t.symbol, icon: t.icon }]));
       } catch {
-        // If overlay query fails, try validating all tokens
-        activeTokenIds = new Set(initial.map((tb) => tb.tokenId));
+        // If overlay query fails, try validating all tokens without metadata
+        tokenMetadata = new Map(initial.map((tb) => [tb.tokenId, {}]));
       }
 
       // Filter to only tokens with active topic managers
-      const activeTokens = initial.filter((tb) => activeTokenIds.has(tb.tokenId));
+      const activeTokens = initial.filter((tb) => tokenMetadata.has(tb.tokenId));
 
       // If no active tokens, clear and return early
       if (activeTokens.length === 0) {
@@ -1849,18 +1849,8 @@ export default function SweepPage() {
 
       const results = await Promise.all(
         activeTokens.map(async (tb) => {
-          // Fetch token metadata
-          let symbol: string | undefined;
-          let icon: string | undefined;
-          let decimals = 0;
-          try {
-            const details = await services.bsv21.getTokenDetails(tb.tokenId);
-            symbol = details.sym;
-            icon = details.icon;
-            decimals = details.dec;
-          } catch {
-            /* use defaults */
-          }
+          // Get metadata from topic manager (no separate fetch needed)
+          const meta = tokenMetadata.get(tb.tokenId);
 
           // Validate each output
           const validated: IndexedOutput[] = [];
@@ -1882,9 +1872,8 @@ export default function SweepPage() {
 
           return {
             ...tb,
-            symbol,
-            icon,
-            decimals,
+            symbol: meta?.symbol,
+            icon: meta?.icon,
             validatedOutputs: validated,
             validatedAmount,
             loading: false,

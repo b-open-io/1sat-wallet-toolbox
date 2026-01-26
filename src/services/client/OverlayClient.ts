@@ -3,12 +3,22 @@ import type { ClientOptions } from "../types";
 
 /** Topic manager metadata returned by listTopicManagers */
 export interface TopicManagerInfo {
+  name?: string;
+  description?: string;
+  icon?: string;
   [key: string]: unknown;
 }
 
 /** Lookup service provider metadata returned by listLookupServiceProviders */
 export interface LookupServiceInfo {
   [key: string]: unknown;
+}
+
+/** BSV-21 token info extracted from topic managers */
+export interface Bsv21TokenInfo {
+  tokenId: string;
+  symbol?: string;
+  icon?: string;
 }
 
 /**
@@ -54,5 +64,26 @@ export class OverlayClient extends BaseClient {
     }
 
     return tokenIds;
+  }
+
+  /**
+   * Get active BSV-21 tokens with metadata from topic managers.
+   * Returns tokenId, symbol (from name), and icon for each active token.
+   */
+  async getActiveBsv21Tokens(): Promise<Bsv21TokenInfo[]> {
+    const topicManagers = await this.listTopicManagers();
+    const tokens: Bsv21TokenInfo[] = [];
+
+    for (const [topic, info] of Object.entries(topicManagers)) {
+      if (topic.startsWith("tm_")) {
+        tokens.push({
+          tokenId: topic.slice(3),
+          symbol: info.name,
+          icon: info.icon,
+        });
+      }
+    }
+
+    return tokens;
   }
 }
