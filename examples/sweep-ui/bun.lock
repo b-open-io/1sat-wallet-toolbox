@@ -4,7 +4,7 @@
     "": {
       "name": "sweep-ui",
       "dependencies": {
-        "@1sat/wallet-toolbox": "0.0.32",
+        "@1sat/wallet-toolbox": "0.0.33",
         "@bsv/sdk": "^1.10.1",
         "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@^1.7.20-idb-fix.17",
         "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17",
@@ -42,7 +42,7 @@
     },
   },
   "packages": {
-    "@1sat/wallet-toolbox": ["@1sat/wallet-toolbox@0.0.32", "", { "dependencies": { "@bopen-io/templates": "^1.1.6", "@bsv/sdk": "^1.10.1", "@msgpack/msgpack": "^3.1.3", "buffer": "^6.0.3", "fflate": "^0.8.2" }, "peerDependencies": { "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17" }, "optionalPeers": ["@bsv/wallet-toolbox-mobile"] }, "sha512-g/6HsTH/ERHZxnejk0D2berSrehDkvxyn8cF3QJcrUFX6Gdd0PmtuFtSk84pFuY6+VNaX9cNoyfIT1qYMDvbag=="],
+    "@1sat/wallet-toolbox": ["@1sat/wallet-toolbox@0.0.33", "", { "dependencies": { "@bopen-io/templates": "^1.1.6", "@bsv/sdk": "^1.10.1", "@msgpack/msgpack": "^3.1.3", "buffer": "^6.0.3", "fflate": "^0.8.2" }, "peerDependencies": { "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17" }, "optionalPeers": ["@bsv/wallet-toolbox-mobile"] }, "sha512-mdGYzGCzpPLl+NMjXG7QwV9afv3o653I7Y2Fs1A1UEPn8O7GVZQMqb7yJTysGTqM0OJod8OajrhuEonKKrV5ig=="],
 
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, ""],
 
