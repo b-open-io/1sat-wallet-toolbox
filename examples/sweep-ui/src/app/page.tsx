@@ -168,6 +168,7 @@ interface TokenBalance {
   validatedOutputs: IndexedOutput[];
   allOutputs: IndexedOutput[];
   loading: boolean;
+  notOnOverlay?: boolean;
 }
 
 const ORDINALS_PER_PAGE = 20;
@@ -836,6 +837,10 @@ function TokensSection({
                       <Spinner size={10} className="text-muted-foreground" />
                       Validating...
                     </span>
+                  ) : tb.notOnOverlay ? (
+                    <span className="text-yellow-500">
+                      Not on overlay ({formatTokenAmount(tb.totalAmount, tb.decimals)} total)
+                    </span>
                   ) : (
                     <>
                       {formatTokenAmount(tb.validatedAmount, tb.decimals)} validated
@@ -853,11 +858,11 @@ function TokensSection({
             <Button
               type="button"
               onClick={() => onSweep(tb)}
-              disabled={!hasWallet || tb.loading || tb.validatedAmount === 0n}
+              disabled={!hasWallet || tb.loading || tb.notOnOverlay || tb.validatedAmount === 0n}
               size="sm"
               className={cn(
                 "text-xs",
-                hasWallet && !tb.loading && tb.validatedAmount > 0n &&
+                hasWallet && !tb.loading && !tb.notOnOverlay && tb.validatedAmount > 0n &&
                   "bg-chart-4 hover:bg-chart-4/90 text-black"
               )}
             >
@@ -1826,53 +1831,74 @@ export default function SweepPage() {
     }));
     setTokenBalances(initial);
 
-    // Fetch details + validate
-    Promise.all(
-      initial.map(async (tb) => {
-        // Fetch token metadata
-        let symbol: string | undefined;
-        let icon: string | undefined;
-        let decimals = 0;
-        try {
-          const details = await services.bsv21.getTokenDetails(tb.tokenId);
-          symbol = details.sym;
-          icon = details.icon;
-          decimals = details.dec;
-        } catch {
-          /* use defaults */
-        }
+    // Fetch active token IDs from overlay, then validate
+    (async () => {
+      // Get active BSV-21 topic managers from overlay
+      let activeTokenIds: Set<string>;
+      try {
+        const ids = await services.overlay.getActiveBsv21TokenIds();
+        activeTokenIds = new Set(ids);
+      } catch {
+        // If overlay query fails, try validating all tokens
+        activeTokenIds = new Set(initial.map((tb) => tb.tokenId));
+      }
 
-        // Validate each output
-        const validated: IndexedOutput[] = [];
-        let validatedAmount = 0n;
-        for (const output of tb.allOutputs) {
-          try {
-            const [txid, voutStr] = output.outpoint.split("_");
-            const vout = Number.parseInt(voutStr, 10);
-            const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
-            const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
-            if (found) {
-              validated.push(output);
-              validatedAmount += parseTokenFromEvents(output)?.amount ?? 0n;
-            }
-          } catch {
-            /* skip */
+      const results = await Promise.all(
+        initial.map(async (tb) => {
+          // Check if token has active topic manager
+          if (!activeTokenIds.has(tb.tokenId)) {
+            return {
+              ...tb,
+              loading: false,
+              notOnOverlay: true,
+            };
           }
-        }
 
-        return {
-          ...tb,
-          symbol,
-          icon,
-          decimals,
-          validatedOutputs: validated,
-          validatedAmount,
-          loading: false,
-        };
-      })
-    ).then((results) => {
+          // Fetch token metadata
+          let symbol: string | undefined;
+          let icon: string | undefined;
+          let decimals = 0;
+          try {
+            const details = await services.bsv21.getTokenDetails(tb.tokenId);
+            symbol = details.sym;
+            icon = details.icon;
+            decimals = details.dec;
+          } catch {
+            /* use defaults */
+          }
+
+          // Validate each output
+          const validated: IndexedOutput[] = [];
+          let validatedAmount = 0n;
+          for (const output of tb.allOutputs) {
+            try {
+              const [txid, voutStr] = output.outpoint.split("_");
+              const vout = Number.parseInt(voutStr, 10);
+              const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
+              const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
+              if (found) {
+                validated.push(output);
+                validatedAmount += parseTokenFromEvents(output)?.amount ?? 0n;
+              }
+            } catch {
+              /* skip */
+            }
+          }
+
+          return {
+            ...tb,
+            symbol,
+            icon,
+            decimals,
+            validatedOutputs: validated,
+            validatedAmount,
+            loading: false,
+          };
+        })
+      );
+
       if (!cancelled) setTokenBalances(results);
-    });
+    })();
 
     return () => {
       cancelled = true;
