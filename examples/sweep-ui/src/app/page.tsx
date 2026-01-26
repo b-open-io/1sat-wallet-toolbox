@@ -168,7 +168,6 @@ interface TokenBalance {
   validatedOutputs: IndexedOutput[];
   allOutputs: IndexedOutput[];
   loading: boolean;
-  notOnOverlay?: boolean;
 }
 
 const ORDINALS_PER_PAGE = 20;
@@ -837,10 +836,6 @@ function TokensSection({
                       <Spinner size={10} className="text-muted-foreground" />
                       Validating...
                     </span>
-                  ) : tb.notOnOverlay ? (
-                    <span className="text-yellow-500">
-                      Not on overlay ({formatTokenAmount(tb.totalAmount, tb.decimals)} total)
-                    </span>
                   ) : (
                     <>
                       {formatTokenAmount(tb.validatedAmount, tb.decimals)} validated
@@ -858,11 +853,11 @@ function TokensSection({
             <Button
               type="button"
               onClick={() => onSweep(tb)}
-              disabled={!hasWallet || tb.loading || tb.notOnOverlay || tb.validatedAmount === 0n}
+              disabled={!hasWallet || tb.loading || tb.validatedAmount === 0n}
               size="sm"
               className={cn(
                 "text-xs",
-                hasWallet && !tb.loading && !tb.notOnOverlay && tb.validatedAmount > 0n &&
+                hasWallet && !tb.loading && tb.validatedAmount > 0n &&
                   "bg-chart-4 hover:bg-chart-4/90 text-black"
               )}
             >
@@ -1843,17 +1838,17 @@ export default function SweepPage() {
         activeTokenIds = new Set(initial.map((tb) => tb.tokenId));
       }
 
-      const results = await Promise.all(
-        initial.map(async (tb) => {
-          // Check if token has active topic manager
-          if (!activeTokenIds.has(tb.tokenId)) {
-            return {
-              ...tb,
-              loading: false,
-              notOnOverlay: true,
-            };
-          }
+      // Filter to only tokens with active topic managers
+      const activeTokens = initial.filter((tb) => activeTokenIds.has(tb.tokenId));
 
+      // If no active tokens, clear and return early
+      if (activeTokens.length === 0) {
+        if (!cancelled) setTokenBalances([]);
+        return;
+      }
+
+      const results = await Promise.all(
+        activeTokens.map(async (tb) => {
           // Fetch token metadata
           let symbol: string | undefined;
           let icon: string | undefined;
