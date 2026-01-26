@@ -9,6 +9,7 @@ import {
   PrivateKey,
   PublicKey,
   Transaction,
+  Utils,
   type CreateActionOutput,
 } from "@bsv/sdk";
 import { BSV21 } from "@bopen-io/templates";
@@ -428,6 +429,27 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
       // Sign each input with our external key
       const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
 
+      // Log transaction structure for debugging
+      console.log(`[sweepOrdinals] === Transaction Structure ===`);
+      console.log(`[sweepOrdinals] Inputs (${tx.inputs.length}):`);
+      let totalInputSats = 0;
+      for (let i = 0; i < tx.inputs.length; i++) {
+        const inp = tx.inputs[i];
+        const sats = inp.sourceTransaction?.outputs[inp.sourceOutputIndex]?.satoshis ?? 0;
+        totalInputSats += sats;
+        console.log(`  [${i}] ${inp.sourceTXID}:${inp.sourceOutputIndex} = ${sats} sats`);
+      }
+      console.log(`[sweepOrdinals] Outputs (${tx.outputs.length}):`);
+      let totalOutputSats = 0;
+      for (let i = 0; i < tx.outputs.length; i++) {
+        const out = tx.outputs[i];
+        totalOutputSats += out.satoshis ?? 0;
+        console.log(`  [${i}] ${out.satoshis} sats, script len=${out.lockingScript?.toHex().length ?? 0}`);
+      }
+      console.log(`[sweepOrdinals] Total in: ${totalInputSats}, Total out: ${totalOutputSats}, Fee: ${totalInputSats - totalOutputSats}`);
+      console.log(`[sweepOrdinals] Signable tx hex: ${Utils.toHex(createResult.signableTransaction.tx)}`);
+      console.log(`[sweepOrdinals] ==============================`);
+
       // Build a set of outpoints we control
       const ourOutpoints = new Set(
         inputs.map((input) => {
@@ -452,6 +474,9 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
       }
 
       await tx.sign();
+
+      // Log signed transaction
+      console.log(`[sweepOrdinals] Signed tx hex: ${tx.toHex()}`);
 
       // Extract unlocking scripts for signAction
       const spends: Record<number, { unlockingScript: string }> = {};

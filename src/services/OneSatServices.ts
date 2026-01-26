@@ -36,6 +36,7 @@ import {
   Bsv21Client,
   ChaintracksClient,
   OrdfsClient,
+  OverlayClient,
   OwnerClient,
   TxoClient,
 } from "./client";
@@ -57,6 +58,7 @@ export type { SyncOutput };
  * - /1sat/txo/* - Transaction outputs
  * - /1sat/owner/* - Address queries and sync
  * - /1sat/ordfs/* - Content/inscription serving
+ * - /overlay/* - Overlay services (topic managers, lookups)
  */
 export class OneSatServices implements WalletServices {
   chain: Chain;
@@ -70,6 +72,7 @@ export class OneSatServices implements WalletServices {
   readonly owner: OwnerClient;
   readonly ordfs: OrdfsClient;
   readonly bsv21: Bsv21Client;
+  readonly overlay: OverlayClient;
 
   // Optional fallback to wallet-toolbox Services for methods we don't implement
   private fallbackServices?: WalletServices;
@@ -103,6 +106,7 @@ export class OneSatServices implements WalletServices {
     this.owner = new OwnerClient(this.baseUrl, opts);
     this.ordfs = new OrdfsClient(this.baseUrl, opts);
     this.bsv21 = new Bsv21Client(this.baseUrl, opts);
+    this.overlay = new OverlayClient(this.baseUrl, opts);
   }
 
   // ===== Utility Methods =====
