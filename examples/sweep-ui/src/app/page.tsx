@@ -8,11 +8,13 @@ import {
   OneSatServices,
   sweepBsv,
   sweepOrdinals,
+  sweepBsv21,
   prepareSweepInputs,
   createContext,
   type IndexedOutput,
   type OrdfsMetadata,
   type SweepOrdinalInput,
+  type SweepBsv21Input,
 } from "@1sat/wallet-toolbox";
 
 // Declare window.CWI from yours-wallet extension
@@ -97,17 +99,41 @@ function getOrdinalOutputs(outputs: IndexedOutput[]): IndexedOutput[] {
     if (o.satoshis !== 1) return false;
     // Exclude locks
     if (o.events?.some((e) => e.startsWith("lock:"))) return false;
-    // Exclude bsv-20 tokens
+    // Exclude bsv-20 tokens (content type or type tag)
     if (o.events?.some((e) => e.includes("application/bsv-20"))) return false;
+    if (o.events?.some((e) => e === "type:Token")) return false;
+    // Exclude bsv-21 tokens (handled separately)
+    if (o.events?.some((e) => e.startsWith("bsv21:"))) return false;
     return true;
   });
 }
 
 /**
- * Check if content type is an image
+ * Get "other" outputs - items we display but don't support sweeping (BSV-20 tokens)
+ */
+function getOtherOutputs(outputs: IndexedOutput[]): IndexedOutput[] {
+  return outputs.filter((o) => {
+    if (o.satoshis !== 1) return false;
+    // BSV-20 tokens: have type:Token tag or application/bsv-20 content type
+    const isBsv20 =
+      o.events?.some((e) => e === "type:Token") ||
+      o.events?.some((e) => e.includes("application/bsv-20"));
+    return isBsv20;
+  });
+}
+
+/**
+ * Check if content type should render in an iframe (SVG, HTML)
+ */
+function isIframeType(contentType: string): boolean {
+  return contentType === "image/svg+xml" || contentType.startsWith("text/html");
+}
+
+/**
+ * Check if content type is an image (excluding SVG which uses iframe)
  */
 function isImageType(contentType: string): boolean {
-  return contentType.startsWith("image/");
+  return contentType.startsWith("image/") && contentType !== "image/svg+xml";
 }
 
 /**
@@ -131,7 +157,61 @@ interface OrdinalWithMetadata extends IndexedOutput {
   metadataError?: string;
 }
 
+/** Token balance aggregated by tokenId */
+interface TokenBalance {
+  tokenId: string;
+  symbol?: string;
+  icon?: string;
+  decimals: number;
+  validatedAmount: bigint;
+  totalAmount: bigint;
+  validatedOutputs: IndexedOutput[];
+  allOutputs: IndexedOutput[];
+  loading: boolean;
+}
+
 const ORDINALS_PER_PAGE = 20;
+
+/**
+ * Filter outputs to get BSV-21 token outputs (1-sat outputs with bsv21 event)
+ */
+function getTokenOutputs(outputs: IndexedOutput[]): IndexedOutput[] {
+  return outputs.filter((o) => {
+    if (o.satoshis !== 1) return false;
+    return o.events?.some((e) => e.startsWith("bsv21:")) ?? false;
+  });
+}
+
+/**
+ * Parse tokenId and amount from output events
+ */
+function parseTokenFromEvents(output: IndexedOutput): { tokenId: string; amount: bigint } | null {
+  const events = output.events ?? [];
+  let tokenId = "";
+  let amount = 0n;
+
+  for (const e of events) {
+    if (e.startsWith("bsv21:")) {
+      tokenId = e.slice(6);
+    } else if (e.startsWith("amt:")) {
+      amount = BigInt(e.slice(4));
+    }
+  }
+
+  if (!tokenId) return null;
+  return { tokenId, amount };
+}
+
+/**
+ * Format token amount with decimals
+ */
+function formatTokenAmount(amount: bigint, decimals: number): string {
+  if (decimals === 0) return amount.toString();
+  const str = amount.toString().padStart(decimals + 1, "0");
+  const intPart = str.slice(0, -decimals) || "0";
+  const decPart = str.slice(-decimals).replace(/0+$/, "");
+  return decPart ? `${intPart}.${decPart}` : intPart;
+}
 
 // ============================================================================
 // PRIMITIVE COMPONENTS
@@ -477,12 +557,11 @@ function OrdinalCard({
 }) {
   const contentType = ordinal.metadata?.contentType ?? "";
   const isImage = isImageType(contentType);
+  const isIframe = isIframeType(contentType);
   const isBsv20 = contentType === "application/bsv-20";
   const hasMetadata = !!ordinal.metadata;
   const hasError = !!ordinal.metadataError;
   const name = getOrdinalName(ordinal.metadata);
-
-  const thumbnailUrl = isImage ? contentUrl : null;
 
   return (
     <div
@@ -516,9 +595,17 @@ function OrdinalCard({
 
       {/* Thumbnail / Icon */}
       <div className="w-full aspect-square mb-2 rounded-lg overflow-hidden bg-black/30 flex items-center justify-center">
-        {thumbnailUrl ? (
+        {isIframe ? (
+          <iframe
+            src={contentUrl}
+            title={name || "Ordinal"}
+            className="w-full h-full border-0 pointer-events-none"
+            sandbox="allow-scripts"
+            loading="lazy"
+          />
+        ) : isImage ? (
           <img
-            src={thumbnailUrl}
+            src={contentUrl}
             alt="Ordinal"
             className="w-full h-full object-cover"
             loading="lazy"
@@ -571,7 +658,6 @@ function OrdinalCard({
 }
 
 function OrdinalsSection({
-  ordinalsWithMetadata,
   sweepableOrdinals,
   selectedOrdinals,
   ordinalPage,
@@ -583,7 +669,6 @@ function OrdinalsSection({
   onPageChange,
   onSweep,
 }: {
-  ordinalsWithMetadata: OrdinalWithMetadata[];
   sweepableOrdinals: OrdinalWithMetadata[];
   selectedOrdinals: Set<string>;
   ordinalPage: number;
@@ -596,7 +681,8 @@ function OrdinalsSection({
   onSweep: () => void;
 }) {
   const selectedCount = selectedOrdinals.size;
-  const sweepableOutpoints = new Set(sweepableOrdinals.map((o) => o.outpoint));
+
+  if (sweepableOrdinals.length === 0) return null;
 
   return (
     <div className="mt-5 p-5 bg-gradient-to-br from-primary/5 to-transparent rounded-xl border border-primary/20">
@@ -607,10 +693,7 @@ function OrdinalsSection({
             <span className="text-sm font-semibold text-primary">Ordinals</span>
           </div>
           <div className="text-xs text-muted-foreground">
-            {ordinalsWithMetadata.length} on this page
-            {sweepableOrdinals.length < ordinalsWithMetadata.length && (
-              <span> ({sweepableOrdinals.length} sweepable)</span>
-            )}
+            {sweepableOrdinals.length} on this page
           </div>
         </div>
 
@@ -641,12 +724,12 @@ function OrdinalsSection({
 
       {/* Ordinal Grid */}
       <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 mb-4">
-        {ordinalsWithMetadata.map((ordinal) => (
+        {sweepableOrdinals.map((ordinal) => (
           <OrdinalCard
             key={ordinal.outpoint}
             ordinal={ordinal}
             isSelected={selectedOrdinals.has(ordinal.outpoint)}
-            isSweepable={sweepableOutpoints.has(ordinal.outpoint)}
+            isSweepable={true}
             onToggle={() => onToggle(ordinal.outpoint)}
             contentUrl={services.ordfs.getContentUrl(ordinal.metadata?.origin ?? ordinal.outpoint)}
           />
@@ -704,6 +787,170 @@ function OrdinalsSection({
   );
 }
 
+function TokensSection({
+  tokenBalances,
+  hasWallet,
+  onSweep,
+}: {
+  tokenBalances: TokenBalance[];
+  hasWallet: boolean;
+  onSweep: (tokenBalance: TokenBalance) => void;
+}) {
+  if (tokenBalances.length === 0) return null;
+
+  return (
+    <div className="mt-5 p-5 bg-gradient-to-br from-chart-4/5 to-transparent rounded-xl border border-chart-4/20">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="w-2 h-2 rounded-full bg-chart-4" />
+        <span className="text-sm font-semibold text-chart-4">BSV-21 Tokens</span>
+      </div>
+
+      <div className="space-y-3">
+        {tokenBalances.map((tb) => (
+          <div
+            key={tb.tokenId}
+            className="flex items-center justify-between p-3 bg-black/20 rounded-lg border border-chart-4/10"
+          >
+            <div className="flex items-center gap-3">
+              {tb.icon ? (
+                <img
+                  src={services.ordfs.getContentUrl(tb.icon)}
+                  alt={tb.symbol || "Token"}
+                  className="w-8 h-8 rounded-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-chart-4/20 flex items-center justify-center text-chart-4 text-sm">
+                  🪙
+                </div>
+              )}
+              <div>
+                <div className="font-medium text-foreground">
+                  {tb.symbol || tb.tokenId.slice(0, 8)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {tb.loading ? (
+                    <span className="flex items-center gap-1">
+                      <Spinner size={10} className="text-muted-foreground" />
+                      Validating...
+                    </span>
+                  ) : (
+                    <>
+                      {formatTokenAmount(tb.validatedAmount, tb.decimals)} validated
+                      {tb.validatedAmount !== tb.totalAmount && (
+                        <span className="text-chart-4/60 ml-1">
+                          / {formatTokenAmount(tb.totalAmount, tb.decimals)} total
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              onClick={() => onSweep(tb)}
+              disabled={!hasWallet || tb.loading || tb.validatedAmount === 0n}
+              size="sm"
+              className={cn(
+                "text-xs",
+                hasWallet && !tb.loading && tb.validatedAmount > 0n &&
+                  "bg-chart-4 hover:bg-chart-4/90 text-black"
+              )}
+            >
+              Sweep →
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      {!hasWallet && (
+        <div className="mt-3 p-2 bg-chart-4/10 rounded-lg text-xs text-chart-4 text-center">
+          Connect Yours Wallet to enable sweep
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OtherSection({
+  bsv20Outputs,
+  unsweepableOrdinals,
+}: {
+  bsv20Outputs: IndexedOutput[];
+  unsweepableOrdinals: OrdinalWithMetadata[];
+}) {
+  const totalCount = bsv20Outputs.length + unsweepableOrdinals.length;
+  if (totalCount === 0) return null;
+
+  return (
+    <div className="mt-5 p-5 bg-gradient-to-br from-muted/20 to-transparent rounded-xl border border-muted/30">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+        <span className="text-sm font-semibold text-muted-foreground">
+          Other ({totalCount})
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        These items cannot be swept with this tool.
+      </p>
+
+      {/* BSV-20 Tokens */}
+      {bsv20Outputs.length > 0 && (
+        <div className="mb-3">
+          <div className="text-xs text-muted-foreground mb-2">BSV-20 Tokens ({bsv20Outputs.length})</div>
+          <div className="flex flex-wrap gap-2">
+            {bsv20Outputs.slice(0, 10).map((o) => {
+              const tickEvent = o.events?.find((e) => e.startsWith("tick:"));
+              const tick = tickEvent ? tickEvent.slice(5) : "Token";
+              return (
+                <div
+                  key={o.outpoint}
+                  className="px-2 py-1 bg-muted/30 rounded text-xs text-muted-foreground"
+                >
+                  {tick}
+                </div>
+              );
+            })}
+            {bsv20Outputs.length > 10 && (
+              <div className="px-2 py-1 text-xs text-muted-foreground">
+                +{bsv20Outputs.length - 10} more
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Unsweepable Ordinals (no metadata) */}
+      {unsweepableOrdinals.length > 0 && (
+        <div>
+          <div className="text-xs text-muted-foreground mb-2">
+            Unknown Ordinals ({unsweepableOrdinals.length})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {unsweepableOrdinals.slice(0, 10).map((o) => (
+              <div
+                key={o.outpoint}
+                className="px-2 py-1 bg-muted/30 rounded text-xs text-muted-foreground font-mono"
+              >
+                {o.outpoint.slice(0, 8)}...
+              </div>
+            ))}
+            {unsweepableOrdinals.length > 10 && (
+              <div className="px-2 py-1 text-xs text-muted-foreground">
+                +{unsweepableOrdinals.length - 10} more
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SourceResultsState({
   fundingOutputs,
   price,
@@ -714,7 +961,6 @@ function SourceResultsState({
   isError,
   error,
   sweepResult,
-  ordinalsWithMetadata,
   sweepableOrdinals,
   selectedOrdinals,
   ordinalPage,
@@ -725,6 +971,10 @@ function SourceResultsState({
   onDeselectAllOrdinals,
   onOrdinalPageChange,
   onSweepOrdinals,
+  tokenBalances,
+  onSweepToken,
+  otherOutputs,
+  unsweepableOrdinals,
 }: {
   fundingOutputs: IndexedOutput[];
   price: number;
@@ -735,7 +985,6 @@ function SourceResultsState({
   isError: boolean;
   error: Error | null;
   sweepResult: { txid?: string; error?: string } | null;
-  ordinalsWithMetadata: OrdinalWithMetadata[];
   sweepableOrdinals: OrdinalWithMetadata[];
   selectedOrdinals: Set<string>;
   ordinalPage: number;
@@ -746,6 +995,10 @@ function SourceResultsState({
   onDeselectAllOrdinals: () => void;
   onOrdinalPageChange: (page: number) => void;
   onSweepOrdinals: () => void;
+  tokenBalances: TokenBalance[];
+  onSweepToken: (tokenBalance: TokenBalance) => void;
+  otherOutputs: IndexedOutput[];
+  unsweepableOrdinals: OrdinalWithMetadata[];
 }) {
   const totalSats = fundingOutputs.reduce((sum, o) => sum + (o.satoshis ?? 0), 0);
 
@@ -774,7 +1027,7 @@ function SourceResultsState({
         </div>
       ) : null}
 
-      {fundingOutputs.length === 0 && totalOrdinalCount === 0 ? (
+      {fundingOutputs.length === 0 && totalOrdinalCount === 0 && tokenBalances.length === 0 ? (
         <div className="text-center py-10 px-5">
           <div className="text-[32px] mb-3 opacity-30">∅</div>
           <p className="m-0 text-muted-foreground">No UTXOs found for this address</p>
@@ -843,7 +1096,6 @@ function SourceResultsState({
           {/* Ordinals Section */}
           {totalOrdinalCount > 0 && (
             <OrdinalsSection
-              ordinalsWithMetadata={ordinalsWithMetadata}
               sweepableOrdinals={sweepableOrdinals}
               selectedOrdinals={selectedOrdinals}
               ordinalPage={ordinalPage}
@@ -856,6 +1108,16 @@ function SourceResultsState({
               onSweep={onSweepOrdinals}
             />
           )}
+
+          {/* Tokens Section */}
+          <TokensSection
+            tokenBalances={tokenBalances}
+            hasWallet={hasWallet}
+            onSweep={onSweepToken}
+          />
+
+          {/* Other Section (BSV-20 and unknown ordinals - not sweepable) */}
+          <OtherSection bsv20Outputs={otherOutputs} unsweepableOrdinals={unsweepableOrdinals} />
         </>
       )}
     </Panel>
@@ -944,7 +1206,6 @@ function SourceContentPreview({
   isError,
   error,
   sweepResult,
-  ordinalsWithMetadata,
   sweepableOrdinals,
   selectedOrdinals,
   ordinalPage,
@@ -955,6 +1216,10 @@ function SourceContentPreview({
   onDeselectAllOrdinals,
   onOrdinalPageChange,
   onSweepOrdinals,
+  tokenBalances,
+  onSweepToken,
+  otherOutputs,
+  unsweepableOrdinals,
 }: {
   dialogState: DialogState;
   fundingOutputs: IndexedOutput[];
@@ -968,7 +1233,6 @@ function SourceContentPreview({
   isError: boolean;
   error: Error | null;
   sweepResult: { txid?: string; error?: string } | null;
-  ordinalsWithMetadata: OrdinalWithMetadata[];
   sweepableOrdinals: OrdinalWithMetadata[];
   selectedOrdinals: Set<string>;
   ordinalPage: number;
@@ -979,6 +1243,10 @@ function SourceContentPreview({
   onDeselectAllOrdinals: () => void;
   onOrdinalPageChange: (page: number) => void;
   onSweepOrdinals: () => void;
+  tokenBalances: TokenBalance[];
+  onSweepToken: (tokenBalance: TokenBalance) => void;
+  otherOutputs: IndexedOutput[];
+  unsweepableOrdinals: OrdinalWithMetadata[];
 }) {
   const handleAmountChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setSweepAmount(e.target.value),
@@ -1010,7 +1278,6 @@ function SourceContentPreview({
           isError={isError}
           error={error}
           sweepResult={sweepResult}
-          ordinalsWithMetadata={ordinalsWithMetadata}
           sweepableOrdinals={sweepableOrdinals}
           selectedOrdinals={selectedOrdinals}
           ordinalPage={ordinalPage}
@@ -1021,6 +1288,10 @@ function SourceContentPreview({
           onDeselectAllOrdinals={onDeselectAllOrdinals}
           onOrdinalPageChange={onOrdinalPageChange}
           onSweepOrdinals={onSweepOrdinals}
+          tokenBalances={tokenBalances}
+          onSweepToken={onSweepToken}
+          otherOutputs={otherOutputs}
+          unsweepableOrdinals={unsweepableOrdinals}
         />
       );
   }
@@ -1242,6 +1513,7 @@ function OrdinalSweepConfirmation({
             {items.map((ordinal) => {
               const contentType = ordinal.metadata?.contentType ?? "";
               const isImage = isImageType(contentType);
+              const isIframe = isIframeType(contentType);
               const contentUrl = services.ordfs.getContentUrl(
                 ordinal.metadata?.origin ?? ordinal.outpoint
               );
@@ -1253,7 +1525,15 @@ function OrdinalSweepConfirmation({
                   className="rounded-lg overflow-hidden bg-black/30 border border-primary/20"
                 >
                   <div className="aspect-square flex items-center justify-center">
-                    {isImage ? (
+                    {isIframe ? (
+                      <iframe
+                        src={contentUrl}
+                        title={name || "Ordinal"}
+                        className="w-full h-full border-0 pointer-events-none"
+                        sandbox="allow-scripts"
+                        loading="lazy"
+                      />
+                    ) : isImage ? (
                       <img
                         src={contentUrl}
                         alt={name || "Ordinal"}
@@ -1385,6 +1665,9 @@ export default function SweepPage() {
   const [ordinalPage, setOrdinalPage] = useState(0);
   const [selectedOrdinals, setSelectedOrdinals] = useState<Set<string>>(new Set());
 
+  // Token state
+  const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
+
   // BSV Price
   const { data: bsvPrice = 0 } = useQuery({
     queryKey: ["bsv-price"],
@@ -1417,13 +1700,13 @@ export default function SweepPage() {
         sats: true,
         events: true,
         tags: ["*"],
-        limit: 100,
+        limit: 500,
         from: pageParam,
       });
       return results ?? [];
     },
     getNextPageParam: (lastPage: IndexedOutput[]) => {
-      if (lastPage.length < 100) return undefined;
+      if (lastPage.length < 500) return undefined;
       return lastPage[lastPage.length - 1].score;
     },
     initialPageParam: undefined as number | undefined,
@@ -1445,6 +1728,9 @@ export default function SweepPage() {
   const ordinalOutputs = useMemo(() => getOrdinalOutputs(allOutputs), [allOutputs]);
   const totalOrdinalPages = Math.ceil(ordinalOutputs.length / ORDINALS_PER_PAGE);
 
+  // Other outputs (BSV-20 tokens - not sweepable)
+  const otherOutputs = useMemo(() => getOtherOutputs(allOutputs), [allOutputs]);
+
   const currentPageOrdinals = useMemo(() => {
     const start = ordinalPage * ORDINALS_PER_PAGE;
     return ordinalOutputs.slice(start, start + ORDINALS_PER_PAGE);
@@ -1456,6 +1742,11 @@ export default function SweepPage() {
       if (o.metadata.contentType === "application/bsv-20") return false;
       return true;
     });
+  }, [ordinalsWithMetadata]);
+
+  // Non-sweepable ordinals (no metadata loaded)
+  const unsweepableOrdinals = useMemo(() => {
+    return ordinalsWithMetadata.filter((o) => !o.metadata?.contentType);
   }, [ordinalsWithMetadata]);
 
   // Transition to results when all pages fetched
@@ -1501,7 +1792,92 @@ export default function SweepPage() {
   useEffect(() => {
     setOrdinalPage(0);
     setSelectedOrdinals(new Set());
+    setTokenBalances([]);
   }, [address]);
+
+  // Token aggregation and validation effect
+  useEffect(() => {
+    const tokenOuts = getTokenOutputs(allOutputs);
+    if (tokenOuts.length === 0 || dialogState.type !== "results") {
+      setTokenBalances([]);
+      return;
+    }
+    let cancelled = false;
+
+    // Group by tokenId
+    const groups = new Map<string, IndexedOutput[]>();
+    for (const o of tokenOuts) {
+      const parsed = parseTokenFromEvents(o);
+      if (!parsed) continue;
+      const existing = groups.get(parsed.tokenId);
+      if (existing) existing.push(o);
+      else groups.set(parsed.tokenId, [o]);
+    }
+
+    // Initial state (loading)
+    const initial: TokenBalance[] = [...groups.entries()].map(([tokenId, outputs]) => ({
+      tokenId,
+      decimals: 0,
+      validatedAmount: 0n,
+      totalAmount: outputs.reduce((sum, o) => sum + (parseTokenFromEvents(o)?.amount ?? 0n), 0n),
+      validatedOutputs: [],
+      allOutputs: outputs,
+      loading: true,
+    }));
+    setTokenBalances(initial);
+
+    // Fetch details + validate
+    Promise.all(
+      initial.map(async (tb) => {
+        // Fetch token metadata
+        let symbol: string | undefined;
+        let icon: string | undefined;
+        let decimals = 0;
+        try {
+          const details = await services.bsv21.getTokenDetails(tb.tokenId);
+          symbol = details.sym;
+          icon = details.icon;
+          decimals = details.dec;
+        } catch {
+          /* use defaults */
+        }
+
+        // Validate each output
+        const validated: IndexedOutput[] = [];
+        let validatedAmount = 0n;
+        for (const output of tb.allOutputs) {
+          try {
+            const [txid, voutStr] = output.outpoint.split("_");
+            const vout = Number.parseInt(voutStr, 10);
+            const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
+            const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
+            if (found) {
+              validated.push(output);
+              validatedAmount += parseTokenFromEvents(output)?.amount ?? 0n;
+            }
+          } catch {
+            /* skip */
+          }
+        }
+
+        return {
+          ...tb,
+          symbol,
+          icon,
+          decimals,
+          validatedOutputs: validated,
+          validatedAmount,
+          loading: false,
+        };
+      })
+    ).then((results) => {
+      if (!cancelled) setTokenBalances(results);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [allOutputs, dialogState.type]);
 
   // Handlers
   const handleWifChange = useCallback(
@@ -1650,6 +2026,62 @@ export default function SweepPage() {
     });
   }, [ordinalsWithMetadata, selectedOrdinals]);
 
+  const handleSweepToken = useCallback(
+    async (tb: TokenBalance) => {
+      if (!wallet || tb.validatedOutputs.length === 0) return;
+
+      setSweeping(true);
+      setSweepResult(null);
+
+      try {
+        const ctx = createContext(wallet, {
+          services,
+          chain: "main",
+        });
+
+        addLog(`Starting token sweep: ${tb.validatedOutputs.length} outputs for ${tb.symbol || tb.tokenId.slice(0, 8)}`);
+
+        const sweepInputs = await prepareSweepInputs(ctx, tb.validatedOutputs);
+        addLog(`Prepared ${sweepInputs.length} inputs`);
+
+        // Build token inputs with amount data
+        const scripts = new Map(sweepInputs.map((s) => [s.outpoint, s.lockingScript]));
+        const tokenInputs: SweepBsv21Input[] = tb.validatedOutputs.map((output) => {
+          const parsed = parseTokenFromEvents(output);
+          return {
+            outpoint: output.outpoint,
+            satoshis: output.satoshis ?? 1,
+            lockingScript: scripts.get(output.outpoint) ?? "",
+            tokenId: tb.tokenId,
+            amount: (parsed?.amount ?? 0n).toString(),
+          };
+        });
+
+        const result = await sweepBsv21.execute(ctx, {
+          inputs: tokenInputs,
+          wif,
+        });
+
+        if (result.txid) {
+          addLog(`Success: ${result.txid}`);
+          // Refresh token balances by removing swept token
+          setTokenBalances((prev) => prev.filter((t) => t.tokenId !== tb.tokenId));
+        } else if (result.error) {
+          addLog(`Sweep failed: ${result.error}`);
+        }
+
+        setSweepResult(result);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Sweep failed";
+        addLog(`Error: ${msg}`);
+        setSweepResult({ error: msg });
+      } finally {
+        setSweeping(false);
+      }
+    },
+    [wallet, wif, addLog]
+  );
+
   return (
     <div className="max-w-[1000px] mx-auto p-6">
       {/* Header */}
@@ -1685,7 +2117,6 @@ export default function SweepPage() {
           isError={isError}
           error={error}
           sweepResult={sweepResult}
-          ordinalsWithMetadata={ordinalsWithMetadata}
           sweepableOrdinals={sweepableOrdinals}
           selectedOrdinals={selectedOrdinals}
           ordinalPage={ordinalPage}
@@ -1696,6 +2127,10 @@ export default function SweepPage() {
           onDeselectAllOrdinals={handleDeselectAllOrdinals}
           onOrdinalPageChange={setOrdinalPage}
           onSweepOrdinals={handleSweepOrdinals}
+          tokenBalances={tokenBalances}
+          onSweepToken={handleSweepToken}
+          otherOutputs={otherOutputs}
+          unsweepableOrdinals={unsweepableOrdinals}
         />
       </div>
 

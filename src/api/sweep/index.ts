@@ -389,17 +389,19 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         const tags: string[] = [];
         if (input.contentType) tags.push(`type:${input.contentType}`);
         if (input.origin) tags.push(`origin:${input.origin}`);
+        const customInstructions = JSON.stringify({
+          protocolID: ONESAT_PROTOCOL,
+          keyID: input.outpoint,
+          ...(input.name && { name: input.name.slice(0, 64) }),
+        });
+        console.log(`[sweepOrdinals] Output for ${input.outpoint}: keyID=${input.outpoint}, customInstructions=${customInstructions}`);
         outputs.push({
           lockingScript: lockingScript.toHex(),
           satoshis: 1,
           outputDescription: `Ordinal ${input.origin ?? input.outpoint}`,
           basket: "1sat",
           tags,
-          customInstructions: JSON.stringify({
-            protocolID: ONESAT_PROTOCOL,
-            keyID: input.outpoint,
-            ...(input.name && { name: input.name.slice(0, 64) }),
-          }),
+          customInstructions,
         });
       }
 

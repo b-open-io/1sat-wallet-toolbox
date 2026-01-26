@@ -18,6 +18,7 @@ import {
   UnlockingScript,
   Utils,
   type WalletOutput,
+  type WalletProtocol,
   type CreateActionArgs,
 } from "@bsv/sdk";
 import { OrdLock } from "@bopen-io/templates";
@@ -25,25 +26,110 @@ import type { Skill, OneSatContext } from "../skills/types";
 import { ORDINALS_BASKET, ORDLOCK_PREFIX, ORDLOCK_SUFFIX, ONESAT_PROTOCOL } from "../constants";
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+function extractName(customInstructions?: string): string | undefined {
+  if (!customInstructions) return undefined;
+  try {
+    const parsed = JSON.parse(customInstructions);
+    return parsed.name;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Sign a P2PKH input using the wallet's key derivation.
+ * Returns the unlocking script hex for the input.
+ */
+async function signP2PKHInput(
+  ctx: OneSatContext,
+  tx: Transaction,
+  inputIndex: number,
+  protocolID: WalletProtocol,
+  keyID: string,
+): Promise<string | { error: string }> {
+  const txInput = tx.inputs[inputIndex];
+
+  const sourceLockingScript = txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]?.lockingScript;
+  if (!sourceLockingScript) {
+    return { error: `missing-source-locking-script-for-input-${inputIndex}` };
+  }
+
+  const sourceTXID = txInput.sourceTXID ?? txInput.sourceTransaction?.id("hex");
+  if (!sourceTXID) {
+    return { error: `missing-source-txid-for-input-${inputIndex}` };
+  }
+
+  const preimage = TransactionSignature.format({
+    sourceTXID,
+    sourceOutputIndex: txInput.sourceOutputIndex,
+    sourceSatoshis: 1,
+    transactionVersion: tx.version,
+    otherInputs: tx.inputs.filter((_, idx) => idx !== inputIndex).map((inp) => ({
+      sourceTXID: inp.sourceTXID ?? inp.sourceTransaction?.id("hex") ?? "",
+      sourceOutputIndex: inp.sourceOutputIndex,
+      sequence: inp.sequence ?? 0xffffffff,
+    })),
+    inputIndex,
+    outputs: tx.outputs,
+    inputSequence: txInput.sequence ?? 0xffffffff,
+    subscript: sourceLockingScript,
+    lockTime: tx.lockTime,
+    scope: TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID,
+  });
+
+  const sighash = Hash.sha256(Hash.sha256(preimage));
+
+  const { signature } = await ctx.wallet.createSignature({
+    protocolID,
+    keyID,
+    counterparty: "self",
+    hashToDirectlySign: Array.from(sighash),
+  });
+
+  const { publicKey } = await ctx.wallet.getPublicKey({
+    protocolID,
+    keyID,
+    forSelf: true,
+  });
+
+  const sigWithHashtype = [...signature, TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID];
+
+  return new UnlockingScript()
+    .writeBin(sigWithHashtype)
+    .writeBin(Utils.toArray(publicKey, "hex"))
+    .toHex();
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
 type PubKeyHex = string;
 
-export interface TransferOrdinalRequest {
-  /** Outpoint of the ordinal to transfer (txid_vout format) */
-  outpoint: string;
+export interface TransferItem {
+  /** The ordinal output to transfer (from listOutputs) */
+  ordinal: WalletOutput;
   /** Recipient's identity public key (preferred) */
   counterparty?: PubKeyHex;
-  /** Legacy: raw P2PKH address */
+  /** Raw P2PKH address */
   address?: string;
-  /** Paymail address */
-  paymail?: string;
+}
+
+export interface TransferOrdinalsRequest {
+  /** Ordinals to transfer with their destinations */
+  transfers: TransferItem[];
+  /** BEEF data from listOutputs (include: 'entire transactions') */
+  inputBEEF: number[];
 }
 
 export interface ListOrdinalRequest {
-  /** Outpoint of ordinal to list */
-  outpoint: string;
+  /** The ordinal output to list (from listOutputs) */
+  ordinal: WalletOutput;
+  /** BEEF data from listOutputs (include: 'entire transactions') */
+  inputBEEF: number[];
   /** Price in satoshis */
   price: number;
   /** Address that receives payment on purchase (BRC-29 receive address) */
@@ -168,60 +254,58 @@ async function buildPurchaseUnlockingScript(
 // ============================================================================
 
 /**
- * Build CreateActionArgs for transferring an ordinal.
+ * Build CreateActionArgs for transferring one or more ordinals.
  * Does NOT execute - returns params for createAction.
  */
-export async function buildTransferOrdinal(
+export async function buildTransferOrdinals(
   ctx: OneSatContext,
-  request: TransferOrdinalRequest,
+  request: TransferOrdinalsRequest,
 ): Promise<CreateActionArgs | { error: string }> {
-  const { outpoint, counterparty, address, paymail } = request;
+  const { transfers, inputBEEF } = request;
 
-  if (!counterparty && !address && !paymail) {
-    return { error: "must-provide-counterparty-address-or-paymail" };
+  if (!transfers.length) {
+    return { error: "no-transfers" };
   }
 
-  let recipientAddress: string;
-  if (counterparty) {
-    const { publicKey } = await ctx.wallet.getPublicKey({
-      protocolID: ONESAT_PROTOCOL,
-      keyID: outpoint,
-      counterparty,
-      forSelf: false,
-    });
-    recipientAddress = PublicKey.fromString(publicKey).toAddress();
-  } else if (paymail) {
-    return { error: "paymail-not-yet-implemented" };
-  } else {
-    recipientAddress = address!;
-  }
+  const inputs: CreateActionArgs["inputs"] = [];
+  const outputs: CreateActionArgs["outputs"] = [];
 
-  const result = await ctx.wallet.listOutputs({
-    basket: ORDINALS_BASKET,
-    includeTags: true,
-    includeCustomInstructions: true,
-    include: "locking scripts",
-    limit: 10000,
-  });
-
-  const sourceOutput = result.outputs.find((o) => o.outpoint === outpoint);
-  if (!sourceOutput) {
-    return { error: "ordinal-not-found" };
-  }
-
-  // Preserve important tags from source output
-  const tags: string[] = [];
-  for (const tag of sourceOutput.tags ?? []) {
-    if (tag.startsWith("type:") || tag.startsWith("origin:") || tag.startsWith("name:")) {
-      tags.push(tag);
+  for (const { ordinal, counterparty, address } of transfers) {
+    if (!counterparty && !address) {
+      return { error: "must-provide-counterparty-or-address" };
     }
-  }
 
-  return {
-    description: "Transfer ordinal",
-    inputs: [{ outpoint, inputDescription: "Ordinal to transfer" }],
-    outputs: [
-      {
+    const outpoint = ordinal.outpoint;
+
+    let recipientAddress: string;
+    if (counterparty) {
+      const { publicKey } = await ctx.wallet.getPublicKey({
+        protocolID: ONESAT_PROTOCOL,
+        keyID: outpoint,
+        counterparty,
+        forSelf: false,
+      });
+      recipientAddress = PublicKey.fromString(publicKey).toAddress();
+    } else {
+      recipientAddress = address!;
+    }
+
+    // Preserve important tags from source output
+    const tags: string[] = [];
+    for (const tag of ordinal.tags ?? []) {
+      if (tag.startsWith("type:") || tag.startsWith("origin:") || tag.startsWith("name:")) {
+        tags.push(tag);
+      }
+    }
+
+    const sourceName = extractName(ordinal.customInstructions);
+
+    inputs!.push({ outpoint, inputDescription: "Ordinal to transfer", unlockingScriptLength: 108 });
+
+    // Only track output in wallet when transferring to a counterparty (wallet can derive keys to spend it)
+    // External address transfers are NOT tracked since the wallet cannot spend them
+    if (counterparty) {
+      outputs!.push({
         lockingScript: new P2PKH().lock(recipientAddress).toHex(),
         satoshis: 1,
         outputDescription: "Ordinal transfer",
@@ -230,9 +314,24 @@ export async function buildTransferOrdinal(
         customInstructions: JSON.stringify({
           protocolID: ONESAT_PROTOCOL,
           keyID: outpoint,
+          ...(sourceName && { name: sourceName }),
         }),
-      },
-    ],
+      });
+    } else {
+      // External address - output is not tracked in wallet
+      outputs!.push({
+        lockingScript: new P2PKH().lock(recipientAddress).toHex(),
+        satoshis: 1,
+        outputDescription: "Ordinal transfer to external address",
+      });
+    }
+  }
+
+  return {
+    description: transfers.length === 1 ? "Transfer ordinal" : `Transfer ${transfers.length} ordinals`,
+    inputBEEF,
+    inputs,
+    outputs,
   };
 }
 
@@ -244,27 +343,18 @@ export async function buildListOrdinal(
   ctx: OneSatContext,
   request: ListOrdinalRequest,
 ): Promise<CreateActionArgs | { error: string }> {
-  const { outpoint, price, payAddress } = request;
+  const { ordinal, inputBEEF, price, payAddress } = request;
 
   if (!payAddress) return { error: "missing-pay-address" };
   if (price <= 0) return { error: "invalid-price" };
 
-  const result = await ctx.wallet.listOutputs({
-    basket: ORDINALS_BASKET,
-    includeTags: true,
-    include: "locking scripts",
-    limit: 10000,
-  });
-
-  const sourceOutput = result.outputs.find((o) => o.outpoint === outpoint);
-  if (!sourceOutput) {
-    return { error: "ordinal-not-found" };
-  }
-
-  const typeTag = sourceOutput.tags?.find((t) => t.startsWith("type:"));
-  const originTag = sourceOutput.tags?.find((t) => t.startsWith("origin:"));
-  const nameTag = sourceOutput.tags?.find((t) => t.startsWith("name:"));
+  const outpoint = ordinal.outpoint;
+  const typeTag = ordinal.tags?.find((t) => t.startsWith("type:"));
+  const originTag = ordinal.tags?.find((t) => t.startsWith("origin:"));
+  const nameTag = ordinal.tags?.find((t) => t.startsWith("name:"));
   const originOutpoint = originTag ? originTag.slice(7) : outpoint;
+
+  const sourceName = extractName(ordinal.customInstructions);
 
   const cancelAddress = await deriveCancelAddressInternal(ctx, outpoint);
   const lockingScript = buildOrdLockScript(cancelAddress, payAddress, price);
@@ -275,7 +365,8 @@ export async function buildListOrdinal(
 
   return {
     description: `List ordinal for ${price} sats`,
-    inputs: [{ outpoint, inputDescription: "Ordinal to list" }],
+    inputBEEF,
+    inputs: [{ outpoint, inputDescription: "Ordinal to list", unlockingScriptLength: 108 }],
     outputs: [
       {
         lockingScript: lockingScript.toHex(),
@@ -286,6 +377,7 @@ export async function buildListOrdinal(
         customInstructions: JSON.stringify({
           protocolID: ONESAT_PROTOCOL,
           keyID: outpoint,
+          ...(sourceName && { name: sourceName }),
         }),
       },
     ],
@@ -362,38 +454,78 @@ export const deriveCancelAddress: Skill<DeriveCancelAddressInput, string> = {
 /**
  * Transfer an ordinal to a new owner.
  */
-export const transferOrdinal: Skill<TransferOrdinalRequest, OrdinalOperationResponse> = {
+export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationResponse> = {
   meta: {
-    name: "transferOrdinal",
-    description: "Transfer an ordinal to a new owner via counterparty pubkey, address, or paymail",
+    name: "transferOrdinals",
+    description: "Transfer one or more ordinals to new owners",
     category: "ordinals",
     inputSchema: {
       type: "object",
       properties: {
-        outpoint: { type: "string", description: "Outpoint of the ordinal (txid_vout format)" },
-        counterparty: { type: "string", description: "Recipient identity public key (hex)" },
-        address: { type: "string", description: "Recipient P2PKH address" },
-        paymail: { type: "string", description: "Recipient paymail address" },
+        transfers: {
+          type: "array",
+          description: "Ordinals to transfer with destinations",
+          items: {
+            type: "object",
+            properties: {
+              ordinal: { type: "object", description: "WalletOutput from listOutputs" },
+              counterparty: { type: "string", description: "Recipient identity public key (hex)" },
+              address: { type: "string", description: "Recipient P2PKH address" },
+            },
+            required: ["ordinal"],
+          },
+        },
+        inputBEEF: { type: "array", description: "BEEF from listOutputs with include: 'entire transactions'" },
       },
-      required: ["outpoint"],
+      required: ["transfers", "inputBEEF"],
     },
   },
   async execute(ctx, input) {
     try {
-      const params = await buildTransferOrdinal(ctx, input);
+      const params = await buildTransferOrdinals(ctx, input);
       if ("error" in params) {
         return params;
       }
 
-      const result = await ctx.wallet.createAction({
+      const createResult = await ctx.wallet.createAction({
         ...params,
-        options: { randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
-      if (!result.txid) {
-        return { error: "no-txid-returned" };
+      if (!createResult.signableTransaction) {
+        return { error: "no-signable-transaction" };
       }
-      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+
+      const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+      const spends: Record<number, { unlockingScript: string }> = {};
+
+      for (let i = 0; i < input.transfers.length; i++) {
+        const { ordinal } = input.transfers[i];
+        console.log(`[transferOrdinals] Input ${i}: outpoint=${ordinal.outpoint}, customInstructions=${ordinal.customInstructions}`);
+        if (!ordinal.customInstructions) {
+          return { error: `missing-custom-instructions-for-${ordinal.outpoint}` };
+        }
+        const { protocolID, keyID } = JSON.parse(ordinal.customInstructions);
+        console.log(`[transferOrdinals] Input ${i}: protocolID=${JSON.stringify(protocolID)}, keyID=${keyID}`);
+
+        const unlocking = await signP2PKHInput(ctx, tx, i, protocolID, keyID);
+        if (typeof unlocking !== "string") return unlocking;
+        spends[i] = { unlockingScript: unlocking };
+      }
+
+      const signResult = await ctx.wallet.signAction({
+        reference: createResult.signableTransaction.reference,
+        spends,
+      });
+
+      if ("error" in signResult) {
+        return { error: String(signResult.error) };
+      }
+
+      return {
+        txid: signResult.txid,
+        rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
+      };
     } catch (error) {
       return { error: error instanceof Error ? error.message : "unknown-error" };
     }
@@ -411,11 +543,12 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
     inputSchema: {
       type: "object",
       properties: {
-        outpoint: { type: "string", description: "Outpoint of the ordinal to list" },
+        ordinal: { type: "object", description: "WalletOutput from listOutputs" },
+        inputBEEF: { type: "array", description: "BEEF from listOutputs with include: 'entire transactions'" },
         price: { type: "integer", description: "Price in satoshis" },
         payAddress: { type: "string", description: "Address to receive payment on purchase" },
       },
-      required: ["outpoint", "price", "payAddress"],
+      required: ["ordinal", "inputBEEF", "price", "payAddress"],
     },
   },
   async execute(ctx, input) {
@@ -425,15 +558,37 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
         return params;
       }
 
-      const result = await ctx.wallet.createAction({
+      const createResult = await ctx.wallet.createAction({
         ...params,
-        options: { randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
-      if (!result.txid) {
-        return { error: "no-txid-returned" };
+      if (!createResult.signableTransaction) {
+        return { error: "no-signable-transaction" };
       }
-      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+
+      if (!input.ordinal.customInstructions) {
+        return { error: "missing-custom-instructions" };
+      }
+      const { protocolID, keyID } = JSON.parse(input.ordinal.customInstructions);
+
+      const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+      const unlocking = await signP2PKHInput(ctx, tx, 0, protocolID, keyID);
+      if (typeof unlocking !== "string") return unlocking;
+
+      const signResult = await ctx.wallet.signAction({
+        reference: createResult.signableTransaction.reference,
+        spends: { 0: { unlockingScript: unlocking } },
+      });
+
+      if ("error" in signResult) {
+        return { error: String(signResult.error) };
+      }
+
+      return {
+        txid: signResult.txid,
+        rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
+      };
     } catch (error) {
       return { error: error instanceof Error ? error.message : "unknown-error" };
     }
@@ -442,8 +597,10 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
 
 /** Input for cancelListing skill */
 export interface CancelListingInput {
-  /** Outpoint of the listing to cancel */
-  outpoint: string;
+  /** The listing output to cancel (from listOutputs, must include lockingScript) */
+  listing: WalletOutput;
+  /** BEEF data from listOutputs (include: 'entire transactions') */
+  inputBEEF: number[];
 }
 
 /**
@@ -457,32 +614,21 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
     inputSchema: {
       type: "object",
       properties: {
-        outpoint: { type: "string", description: "Outpoint of the listing to cancel" },
+        listing: { type: "object", description: "WalletOutput of the listing (must include lockingScript)" },
+        inputBEEF: { type: "array", description: "BEEF from listOutputs with include: 'entire transactions'" },
       },
-      required: ["outpoint"],
+      required: ["listing", "inputBEEF"],
     },
   },
   async execute(ctx, input) {
     try {
-      const { outpoint } = input;
-
-      const result = await ctx.wallet.listOutputs({
-        basket: ORDINALS_BASKET,
-        includeTags: true,
-        includeCustomInstructions: true,
-        include: "locking scripts",
-        limit: 10000,
-      });
-
-      const listing = result.outputs.find((o) => o.outpoint === outpoint);
-      if (!listing) {
-        return { error: "listing-not-found" };
-      }
+      const { listing, inputBEEF } = input;
+      const outpoint = listing.outpoint;
 
       if (!listing.customInstructions) {
         return { error: "missing-custom-instructions" };
       }
-      const { protocolID, keyID } = JSON.parse(listing.customInstructions);
+      const { protocolID, keyID, name: listingName } = JSON.parse(listing.customInstructions);
 
       const typeTag = listing.tags?.find((t) => t.startsWith("type:"));
       const originTag = listing.tags?.find((t) => t.startsWith("origin:"));
@@ -497,6 +643,7 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
 
       const createResult = await ctx.wallet.createAction({
         description: "Cancel ordinal listing",
+        inputBEEF,
         inputs: [
           {
             outpoint,
@@ -511,7 +658,7 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
             outputDescription: "Cancelled listing",
             basket: ORDINALS_BASKET,
             tags,
-            customInstructions: JSON.stringify({ protocolID, keyID }),
+            customInstructions: JSON.stringify({ protocolID, keyID, ...(listingName && { name: listingName }) }),
           },
         ],
         options: { signAndProcess: false, randomizeOutputs: false },
@@ -527,7 +674,10 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
 
       const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
       const txInput = tx.inputs[0];
-      const lockingScript = Script.fromHex(listing.lockingScript!);
+      const lockingScript = txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]?.lockingScript;
+      if (!lockingScript) {
+        return { error: "missing-locking-script" };
+      }
 
       const sourceTXID = txInput.sourceTXID ?? txInput.sourceTransaction?.id("hex");
       if (!sourceTXID) {
@@ -688,6 +838,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         customInstructions: JSON.stringify({
           protocolID: ONESAT_PROTOCOL,
           keyID: outpoint,
+          ...(name && { name: name.slice(0, 64) }),
         }),
       });
 
@@ -774,7 +925,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
 export const ordinalsSkills = [
   listOrdinals,
   deriveCancelAddress,
-  transferOrdinal,
+  transferOrdinals,
   listOrdinal,
   cancelListing,
   purchaseOrdinal,

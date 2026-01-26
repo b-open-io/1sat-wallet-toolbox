@@ -480,6 +480,7 @@ export class SyncProcessor {
       // These outputs need custom unlock scripts when spent
       const basket = txo.basket || "custom";
       const tags = this.collectTags(txo);
+      const nameTag = tags.find((t) => t.startsWith("name:"));
 
       return {
         outputIndex: vout,
@@ -487,11 +488,11 @@ export class SyncProcessor {
         insertionRemittance: {
           basket,
           tags,
-          // Store derivation info for future signing
           customInstructions: JSON.stringify({
             derivationPrefix: derivation.derivationPrefix,
             derivationSuffix: derivation.derivationSuffix,
             senderIdentityKey: derivation.senderIdentityKey,
+            ...(nameTag && { name: nameTag.slice(5).slice(0, 64) }),
           }),
         },
       };

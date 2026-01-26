@@ -106,6 +106,7 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
             customInstructions: JSON.stringify({
               protocolID: ONESAT_PROTOCOL,
               keyID,
+              ...(input.map?.name && { name: input.map.name.slice(0, 64) }),
             }),
           },
         ],

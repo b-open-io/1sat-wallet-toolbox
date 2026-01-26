@@ -6,17 +6,17 @@
  *
  * Usage:
  * ```typescript
- * import { createContext, transferOrdinal, skillRegistry } from '@1sat/wallet-toolbox/api';
+ * import { createContext, transferOrdinals, skillRegistry } from '@1sat/wallet-toolbox/api';
  *
  * // Create context with a BRC-100 compatible wallet
  * const ctx = createContext(wallet, { services, chain: 'main' });
  *
  * // Execute skills directly
- * const result = await transferOrdinal.execute(ctx, { outpoint: '...', address: '...' });
+ * const result = await transferOrdinals.execute(ctx, { transfers: [...], inputBEEF: [...] });
  *
  * // Or via registry (useful for AI agents)
- * const skill = skillRegistry.get('transferOrdinal');
- * const result = await skill.execute(ctx, { outpoint: '...', address: '...' });
+ * const skill = skillRegistry.get('transferOrdinals');
+ * const result = await skill.execute(ctx, { transfers: [...], inputBEEF: [...] });
  *
  * // Get MCP-compatible tool list
  * const tools = skillRegistry.toMcpTools();
