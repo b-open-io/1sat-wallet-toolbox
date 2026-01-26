@@ -1814,19 +1814,7 @@ export default function SweepPage() {
       else groups.set(parsed.tokenId, [o]);
     }
 
-    // Initial state (loading)
-    const initial: TokenBalance[] = [...groups.entries()].map(([tokenId, outputs]) => ({
-      tokenId,
-      decimals: 0,
-      validatedAmount: 0n,
-      totalAmount: outputs.reduce((sum, o) => sum + (parseTokenFromEvents(o)?.amount ?? 0n), 0n),
-      validatedOutputs: [],
-      allOutputs: outputs,
-      loading: true,
-    }));
-    setTokenBalances(initial);
-
-    // Fetch active tokens with metadata from overlay, then validate
+    // Fetch active tokens FIRST, then only show tokens that have overlay topics
     (async () => {
       // Get active BSV-21 tokens with metadata from topic managers
       let tokenMetadata: Map<string, { symbol?: string; icon?: string }>;
@@ -1834,25 +1822,43 @@ export default function SweepPage() {
         const tokens = await services.overlay.getActiveBsv21Tokens();
         tokenMetadata = new Map(tokens.map((t) => [t.tokenId, { symbol: t.symbol, icon: t.icon }]));
       } catch {
-        // If overlay query fails, try validating all tokens without metadata
-        tokenMetadata = new Map(initial.map((tb) => [tb.tokenId, {}]));
-      }
-
-      // Filter to only tokens with active topic managers
-      const activeTokens = initial.filter((tb) => tokenMetadata.has(tb.tokenId));
-
-      // If no active tokens, clear and return early
-      if (activeTokens.length === 0) {
+        // If overlay query fails, we can't validate - show nothing
         if (!cancelled) setTokenBalances([]);
         return;
       }
 
+      // Filter to only tokens that exist in wallet AND have active topic managers
+      const activeTokenIds = [...groups.keys()].filter((tokenId) => tokenMetadata.has(tokenId));
+
+      // If no active tokens, clear and return early
+      if (activeTokenIds.length === 0) {
+        if (!cancelled) setTokenBalances([]);
+        return;
+      }
+
+      // Build initial state for active tokens only (loading state)
+      const activeTokens: TokenBalance[] = activeTokenIds.map((tokenId) => {
+        const outputs = groups.get(tokenId) ?? [];
+        const meta = tokenMetadata.get(tokenId);
+        return {
+          tokenId,
+          symbol: meta?.symbol,
+          icon: meta?.icon,
+          decimals: 0,
+          validatedAmount: 0n,
+          totalAmount: outputs.reduce((sum, o) => sum + (parseTokenFromEvents(o)?.amount ?? 0n), 0n),
+          validatedOutputs: [],
+          allOutputs: outputs,
+          loading: true,
+        };
+      });
+
+      // Set loading state for active tokens only
+      if (!cancelled) setTokenBalances(activeTokens);
+
+      // Validate each output
       const results = await Promise.all(
         activeTokens.map(async (tb) => {
-          // Get metadata from topic manager (no separate fetch needed)
-          const meta = tokenMetadata.get(tb.tokenId);
-
-          // Validate each output
           const validated: IndexedOutput[] = [];
           let validatedAmount = 0n;
           for (const output of tb.allOutputs) {
@@ -1872,8 +1878,6 @@ export default function SweepPage() {
 
           return {
             ...tb,
-            symbol: meta?.symbol,
-            icon: meta?.icon,
             validatedOutputs: validated,
             validatedAmount,
             loading: false,

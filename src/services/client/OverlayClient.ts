@@ -36,7 +36,7 @@ export class OverlayClient extends BaseClient {
    */
   async listTopicManagers(): Promise<Record<string, TopicManagerInfo>> {
     return this.request<Record<string, TopicManagerInfo>>(
-      "/overlay/listTopicManagers"
+      "/1sat/overlay/listTopicManagers"
     );
   }
 
@@ -45,7 +45,7 @@ export class OverlayClient extends BaseClient {
    */
   async listLookupServiceProviders(): Promise<Record<string, LookupServiceInfo>> {
     return this.request<Record<string, LookupServiceInfo>>(
-      "/overlay/listLookupServiceProviders"
+      "/1sat/overlay/listLookupServiceProviders"
     );
   }
 
