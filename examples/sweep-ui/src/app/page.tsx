@@ -1705,13 +1705,13 @@ export default function SweepPage() {
         sats: true,
         events: true,
         tags: ["*"],
-        limit: 500,
+        limit: 5000,
         from: pageParam,
       });
       return results ?? [];
     },
     getNextPageParam: (lastPage: IndexedOutput[]) => {
-      if (lastPage.length < 500) return undefined;
+      if (lastPage.length < 5000) return undefined;
       return lastPage[lastPage.length - 1].score;
     },
     initialPageParam: undefined as number | undefined,
