@@ -51,6 +51,10 @@ export interface WebWalletConfig {
   feeModel?: { model: "sat/kb"; value: number };
   /** Remote storage URL. If provided, attempts to connect for cloud backup. */
   remoteStorageUrl?: string;
+  /** Callback when a transaction is broadcasted (called after remote sync if connected) */
+  onTransactionBroadcasted?: (txid: string) => void;
+  /** Callback when a transaction is proven (called after remote sync if connected) */
+  onTransactionProven?: (txid: string, blockHeight: number) => void;
 }
 
 /**
@@ -290,10 +294,12 @@ export async function createWebWallet(
   });
   monitor.addDefaultTasks();
 
-  // 9. Wire up monitor callbacks to sync to remote backup
-  if (remoteClient) {
-    monitor.onTransactionBroadcasted = async (result) => {
-      console.log("[Monitor] Transaction broadcasted:", result.txid);
+  // 9. Wire up monitor callbacks - sync to remote first, then call user callbacks
+  monitor.onTransactionBroadcasted = async (result) => {
+    console.log("[Monitor] Transaction broadcasted:", result.txid);
+
+    // Sync to remote backup first (if connected)
+    if (remoteClient) {
       try {
         const auth = await storage.getAuth();
         await storage.syncToWriter(auth, remoteClient);
@@ -301,10 +307,23 @@ export async function createWebWallet(
       } catch (err) {
         console.warn("[Monitor] Failed to sync after broadcast:", err);
       }
-    };
+    }
 
-    monitor.onTransactionProven = async (status) => {
-      console.log("[Monitor] Transaction proven:", status.txid, "block", status.blockHeight);
+    // Then call user callback (if provided)
+    if (result.txid && config.onTransactionBroadcasted) {
+      try {
+        config.onTransactionBroadcasted(result.txid);
+      } catch (err) {
+        console.warn("[Monitor] User callback error after broadcast:", err);
+      }
+    }
+  };
+
+  monitor.onTransactionProven = async (status) => {
+    console.log("[Monitor] Transaction proven:", status.txid, "block", status.blockHeight);
+
+    // Sync to remote backup first (if connected)
+    if (remoteClient) {
       try {
         const auth = await storage.getAuth();
         await storage.syncToWriter(auth, remoteClient);
@@ -312,8 +331,17 @@ export async function createWebWallet(
       } catch (err) {
         console.warn("[Monitor] Failed to sync after confirmation:", err);
       }
-    };
-  }
+    }
+
+    // Then call user callback (if provided)
+    if (config.onTransactionProven) {
+      try {
+        config.onTransactionProven(status.txid, status.blockHeight);
+      } catch (err) {
+        console.warn("[Monitor] User callback error after proven:", err);
+      }
+    }
+  };
 
   // 10. Create cleanup function
   const destroy = async (): Promise<void> => {
