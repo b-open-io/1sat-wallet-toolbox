@@ -148,26 +148,29 @@ export async function createWebWallet(
   const localStorage = new StorageIdb(storageOptions);
   await localStorage.migrate(DEFAULT_DATABASE_NAME, identityPubKey);
 
-  // 4. Attempt remote storage connection BEFORE creating Wallet (if URL provided)
+  // 4. Create storage manager with local-only storage initially (empty backups)
+  const storage = new WalletStorageManager(identityPubKey, localStorage, []);
+  await storage.makeAvailable();
+
+  // 5. Create the underlying Wallet FIRST (needed for StorageClient signing)
+  const underlyingWallet = new Wallet({
+    chain,
+    keyDeriver,
+    storage,
+    services: oneSatServices as unknown as MobileWalletServices,
+  });
+
+  // 6. Attempt remote storage connection AFTER wallet exists
   let remoteClient: StorageClient | undefined;
   if (config.remoteStorageUrl) {
     console.log(
       `[createWebWallet] Attempting remote storage connection to ${config.remoteStorageUrl}`,
     );
     try {
-      // Create a temporary wallet just for StorageClient auth
-      // StorageClient needs a wallet to sign requests
-      const tempStorage = new WalletStorageManager(identityPubKey, localStorage);
-      await tempStorage.makeAvailable();
-      const tempWallet = new Wallet({
-        chain,
-        keyDeriver,
-        storage: tempStorage,
-        services: oneSatServices as unknown as MobileWalletServices,
-      });
-
+      // Create StorageClient with the REAL wallet (not a temp wallet)
+      // StorageClient captures the wallet at construction for signing requests
       remoteClient = new StorageClient(
-        tempWallet as unknown as WalletInterface,
+        underlyingWallet as unknown as WalletInterface,
         config.remoteStorageUrl,
       );
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -177,10 +180,10 @@ export async function createWebWallet(
         ),
       );
       await Promise.race([remoteClient.makeAvailable(), timeoutPromise]);
-      console.log("[createWebWallet] Remote storage connected successfully");
 
-      // Clean up temp wallet (don't destroy storage - we'll reuse localStorage)
-      await tempWallet.destroy();
+      // Add remote storage to the existing storage manager using public API
+      await storage.addWalletStorageProvider(remoteClient);
+      console.log("[createWebWallet] Remote storage connected successfully");
     } catch (err) {
       console.log(
         "[createWebWallet] Remote storage connection failed:",
@@ -189,11 +192,6 @@ export async function createWebWallet(
       remoteClient = undefined;
     }
   }
-
-  // 5. Create storage manager with final configuration (local + remote if connected)
-  const backups = remoteClient ? [remoteClient] : [];
-  const storage = new WalletStorageManager(identityPubKey, localStorage, backups);
-  await storage.makeAvailable();
 
   // Log storage state using public APIs
   const stores = storage.getStores();
@@ -205,7 +203,7 @@ export async function createWebWallet(
     allStores: stores.map(s => ({ name: s.storageName, key: s.storageIdentityKey.slice(0, 16) + "..." })),
   });
 
-  // 6. Handle conflicting actives or push to backups
+  // 7. Handle conflicting actives or sync to backups
   const conflictingStores = storage.getConflictingStores();
   const backupStores = storage.getBackupStores();
 
@@ -242,14 +240,6 @@ export async function createWebWallet(
         );
       });
   }
-
-  // 7. Create the underlying Wallet with the FINAL storage configuration
-  const underlyingWallet = new Wallet({
-    chain,
-    keyDeriver,
-    storage,
-    services: oneSatServices as unknown as MobileWalletServices,
-  });
 
   // 8. Wrap with permissions manager
   const wallet = new WalletPermissionsManager(
