@@ -514,6 +514,78 @@ export function DebugPanel({
     }
   }, [log, scanDatabases]);
 
+  // Backup a database by copying all data to a new database with -backup suffix
+  const backupDatabase = useCallback(async (dbName: string) => {
+    const backupName = `${dbName}-backup-${Date.now()}`;
+    log(`[DEBUG] Backing up ${dbName} to ${backupName}...`);
+    setLoading(true);
+
+    try {
+      // Open source database
+      const dbInfo = dbStats.find(d => d.name === dbName);
+      const sourceDb = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(dbName, dbInfo?.version);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+
+      const storeNames = Array.from(sourceDb.objectStoreNames);
+      log(`[DEBUG] Found ${storeNames.length} stores to backup`);
+
+      // Create backup database with same structure
+      const backupDb = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(backupName, 1);
+        request.onupgradeneeded = (event) => {
+          const db = (event.target as IDBOpenDBRequest).result;
+          // Recreate all object stores
+          for (const storeName of storeNames) {
+            const sourceStore = sourceDb.transaction(storeName, "readonly").objectStore(storeName);
+            const newStore = db.createObjectStore(storeName, {
+              keyPath: sourceStore.keyPath as string | null,
+              autoIncrement: sourceStore.autoIncrement,
+            });
+            // Copy indexes
+            for (const indexName of Array.from(sourceStore.indexNames)) {
+              const index = sourceStore.index(indexName);
+              newStore.createIndex(indexName, index.keyPath, {
+                unique: index.unique,
+                multiEntry: index.multiEntry,
+              });
+            }
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+
+      // Copy all data from each store
+      for (const storeName of storeNames) {
+        const records = await getAllRecords(sourceDb, storeName);
+        if (records.length > 0) {
+          const tx = backupDb.transaction(storeName, "readwrite");
+          const store = tx.objectStore(storeName);
+          for (const record of records) {
+            store.add(record);
+          }
+          await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          });
+          log(`[DEBUG] Copied ${records.length} records from ${storeName}`);
+        }
+      }
+
+      sourceDb.close();
+      backupDb.close();
+      log(`[DEBUG] Backup complete: ${backupName}`);
+      await scanDatabases();
+    } catch (e) {
+      log(`[DEBUG] Error backing up database: ${e}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [dbStats, log, scanDatabases]);
+
   if (!expanded) {
     return (
       <Card className="fixed bottom-4 right-4 p-3 bg-black/90 border-yellow-500/50 z-50">
@@ -716,7 +788,22 @@ export function DebugPanel({
               <div className="text-xs font-semibold text-muted-foreground mb-2">Quick Actions</div>
               <div className="flex gap-2 flex-wrap">
                 <Button
-                  onClick={() => destWallet?.fullSync?.()}
+                  onClick={async () => {
+                    if (!destWallet?.fullSync) return;
+                    setLoading(true);
+                    log("[DEST SYNC] Starting full sync...");
+                    try {
+                      const result = await destWallet.fullSync((stage, message) => {
+                        log(`[DEST SYNC] [${stage}] ${message}`);
+                      });
+                      log(`[DEST SYNC] Complete: pushed ${result.pushed.inserts}/${result.pushed.updates}, pulled ${result.pulled.inserts}/${result.pulled.updates}`);
+                    } catch (err) {
+                      log(`[DEST SYNC] ERROR: ${err}`);
+                      console.error("[DEST SYNC] Error:", err);
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
                   disabled={loading || !destWallet?.fullSync}
                   size="sm"
                   variant="outline"
@@ -767,14 +854,25 @@ export function DebugPanel({
                     <span className="text-sm font-medium text-foreground">
                       {db.name} <span className="text-muted-foreground">v{db.version}</span>
                     </span>
-                    <Button
-                      onClick={() => clearDatabase(db.name)}
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive text-xs h-6 px-2"
-                    >
-                      Delete
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        onClick={() => backupDatabase(db.name)}
+                        size="sm"
+                        variant="ghost"
+                        className="text-blue-400 text-xs h-6 px-2"
+                        disabled={loading}
+                      >
+                        Backup
+                      </Button>
+                      <Button
+                        onClick={() => clearDatabase(db.name)}
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive text-xs h-6 px-2"
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     {db.tables.map((table) => (
