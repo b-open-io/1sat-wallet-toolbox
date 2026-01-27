@@ -73,6 +73,10 @@ export interface WebWalletResult {
   destroy: () => Promise<void>;
   /** Full sync with remote backup (only available if remoteStorageUrl was provided and connected) */
   fullSync?: (onProgress?: (stage: FullSyncStage, message: string) => void) => Promise<FullSyncResult>;
+  /** Storage manager (for debugging/diagnostics) */
+  storage: WalletStorageManager;
+  /** Remote storage client (for debugging/diagnostics, undefined if not connected) */
+  remoteStorage?: StorageClient;
 }
 
 /**
@@ -345,5 +349,7 @@ export async function createWebWallet(
     monitor,
     destroy,
     fullSync: fullSyncFn,
+    storage,
+    remoteStorage: remoteClient,
   };
 }

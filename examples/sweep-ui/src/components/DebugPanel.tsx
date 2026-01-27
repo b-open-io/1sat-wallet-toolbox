@@ -329,51 +329,24 @@ export function DebugPanel({
     try {
       log("[CHUNK] Checking getSyncChunk from remote...");
 
-      const rawWallet = targetWallet.rawWallet as unknown as {
-        _storage?: {
-          getAuth?: () => Promise<{ userId: number; identityKey: string }>;
-          getSettings?: () => { storageIdentityKey: string };
-          getBackupStores?: () => string[];
-          _stores?: Array<{
-            storage: {
-              getSettings?: () => { storageIdentityKey: string };
-              getSyncChunk?: (args: unknown) => Promise<{
-                users?: unknown[];
-                provenTxs?: unknown[];
-                transactions?: unknown[];
-                outputs?: unknown[];
-                provenTxReqs?: unknown[];
-                outputBaskets?: unknown[];
-                txLabels?: unknown[];
-                outputTags?: unknown[];
-                txLabelMaps?: unknown[];
-                outputTagMaps?: unknown[];
-              }>;
-            };
-            settings?: { storageIdentityKey: string };
-          }>;
-        };
-      };
+      const storage = targetWallet.storage;
+      const remoteStorage = targetWallet.remoteStorage as {
+        getSyncChunk?: (args: unknown) => Promise<Record<string, unknown[]>>;
+        getSettings?: () => { storageIdentityKey: string };
+      } | undefined;
 
-      const storage = rawWallet._storage;
-      if (!storage?.getAuth || !storage?.getSettings) {
-        log("[CHUNK] Storage methods not available");
+      if (!storage) {
+        log("[CHUNK] No storage on wallet");
         return;
       }
 
-      const backupStoreKeys = storage.getBackupStores?.() || [];
-      if (backupStoreKeys.length === 0) {
-        log("[CHUNK] No remote backup connected");
+      if (!remoteStorage) {
+        log("[CHUNK] No remote storage connected");
         return;
       }
 
-      // Find the backup store by its key
-      const backupStore = storage._stores?.find(s =>
-        s.settings?.storageIdentityKey && backupStoreKeys.includes(s.settings.storageIdentityKey)
-      );
-      const remoteStorage = backupStore?.storage;
-      if (!remoteStorage?.getSyncChunk || !remoteStorage?.getSettings) {
-        log("[CHUNK] Remote client doesn't have required methods");
+      if (!remoteStorage.getSyncChunk || !remoteStorage.getSettings) {
+        log("[CHUNK] Remote storage missing required methods");
         return;
       }
 

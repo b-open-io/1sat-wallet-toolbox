@@ -11,11 +11,14 @@ import {
   sweepBsv21,
   prepareSweepInputs,
   createContext,
+  createWebWallet,
   type IndexedOutput,
   type OrdfsMetadata,
   type SweepOrdinalInput,
   type SweepBsv21Input,
+  type WebWalletResult,
 } from "@1sat/wallet-toolbox";
+import { DebugPanel } from "@/components/DebugPanel";
 
 // Declare window.CWI from yours-wallet extension
 declare global {
@@ -442,6 +445,121 @@ function useCWIWallet(): CWIWalletState {
     addLog,
     clearLogs,
     connect,
+  };
+}
+
+// Remote storage URL (same as yours-wallet uses)
+const REMOTE_STORAGE_URL = "https://1sat.shruggr.cloud/1sat/wallet";
+
+// Destination wallet database name (different from main wallet to simulate fresh install)
+const DEST_WALLET_DB_NAME = "wallet-debug";
+
+interface DestinationWalletState {
+  wallet: WebWalletResult | null;
+  loading: boolean;
+  error: string | null;
+  create: (wif: string) => Promise<void>;
+  destroy: () => Promise<void>;
+}
+
+function useDestinationWallet(addLog: (msg: string) => void): DestinationWalletState {
+  const [wallet, setWallet] = useState<WebWalletResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const create = useCallback(async (wif: string) => {
+    if (wallet) {
+      addLog("[DEST] Wallet already exists, destroy first");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    addLog("[DEST] Creating fresh destination wallet...");
+
+    try {
+      // First, delete the debug database to ensure fresh state
+      addLog(`[DEST] Deleting existing ${DEST_WALLET_DB_NAME} database...`);
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(DEST_WALLET_DB_NAME);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => {
+          addLog("[DEST] Database deletion blocked - close other tabs");
+        };
+      });
+      addLog("[DEST] Database deleted");
+
+      // Create wallet with fresh IDB
+      addLog(`[DEST] Connecting to remote storage: ${REMOTE_STORAGE_URL}`);
+      const result = await createWebWallet({
+        privateKey: wif,
+        chain: "main",
+        adminOriginator: "https://sweep-ui.local",
+        permissionsConfig: {
+          seekProtocolPermissionsForSigning: false,
+          seekProtocolPermissionsForEncrypting: false,
+          seekProtocolPermissionsForHMAC: false,
+          seekPermissionsForKeyLinkageRevelation: false,
+          seekPermissionsForPublicKeyRevelation: false,
+          seekPermissionsForIdentityKeyRevelation: false,
+          seekPermissionsForIdentityResolution: false,
+          seekBasketInsertionPermissions: false,
+          seekBasketRemovalPermissions: false,
+          seekBasketListingPermissions: false,
+          seekPermissionWhenApplyingActionLabels: false,
+          seekPermissionWhenListingActionsByLabel: false,
+          seekCertificateDisclosurePermissions: false,
+          seekCertificateAcquisitionPermissions: false,
+          seekCertificateRelinquishmentPermissions: false,
+          seekCertificateListingPermissions: false,
+          encryptWalletMetadata: false,
+          seekSpendingPermissions: false,
+          seekGroupedPermission: false,
+          differentiatePrivilegedOperations: false,
+        },
+        remoteStorageUrl: REMOTE_STORAGE_URL,
+      });
+
+      setWallet(result);
+      addLog("[DEST] Wallet created successfully");
+
+      if (result.fullSync) {
+        addLog("[DEST] Remote storage connected - fullSync available");
+      } else {
+        addLog("[DEST] WARNING: Remote storage NOT connected");
+      }
+
+      // Don't start monitor - we're just debugging sync
+      // result.monitor.startTasks();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      addLog(`[DEST] Error: ${msg}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, addLog]);
+
+  const destroy = useCallback(async () => {
+    if (!wallet) return;
+
+    addLog("[DEST] Destroying wallet...");
+    try {
+      await wallet.destroy();
+      setWallet(null);
+      addLog("[DEST] Wallet destroyed");
+    } catch (e) {
+      addLog(`[DEST] Error destroying: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [wallet, addLog]);
+
+  return {
+    wallet,
+    loading,
+    error,
+    create,
+    destroy,
   };
 }
 
@@ -1655,6 +1773,14 @@ export default function SweepPage() {
   const hasWallet = cwiStatus === "ready" && wallet !== null;
   const [destExpanded, setDestExpanded] = useState(false);
 
+  // Destination wallet state (for debugging sync with fresh IDB)
+  const {
+    wallet: destWallet,
+    loading: destWalletLoading,
+    create: createDestWallet,
+    destroy: destroyDestWallet,
+  } = useDestinationWallet(addLog);
+
   // Sweep state
   const [sweepAmount, setSweepAmount] = useState("");
   const [sweeping, setSweeping] = useState(false);
@@ -1861,18 +1987,24 @@ export default function SweepPage() {
         activeTokens.map(async (tb) => {
           const validated: IndexedOutput[] = [];
           let validatedAmount = 0n;
+          console.log(`[Validate] Token ${tb.symbol || tb.tokenId.slice(0, 8)}: ${tb.allOutputs.length} outputs to check`);
           for (const output of tb.allOutputs) {
             try {
               const [txid, voutStr] = output.outpoint.split("_");
               const vout = Number.parseInt(voutStr, 10);
+              console.log(`[Validate] Checking ${tb.tokenId} tx/${txid}`);
               const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
+              console.log(`[Validate] Got txData:`, txData);
               const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
               if (found) {
                 validated.push(output);
                 validatedAmount += parseTokenFromEvents(output)?.amount ?? 0n;
+                console.log(`[Validate] VALID: vout ${vout}`);
+              } else {
+                console.log(`[Validate] NOT VALID: vout ${vout} not found or spent`);
               }
-            } catch {
-              /* skip */
+            } catch (e) {
+              console.log(`[Validate] ERROR for ${output.outpoint}:`, e);
             }
           }
 
@@ -2206,6 +2338,17 @@ export default function SweepPage() {
           sweeping={sweeping}
         />
       )}
+
+      {/* Debug Panel */}
+      <DebugPanel
+        wallet={destWallet}
+        addLog={addLog}
+        destWallet={destWallet}
+        onCreateDestWallet={createDestWallet}
+        onDestroyDestWallet={destroyDestWallet}
+        destWalletLoading={destWalletLoading}
+        cwiWallet={wallet}
+      />
     </div>
   );
 }
