@@ -13,13 +13,13 @@
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
         "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@^1.7.20-idb-fix.17",
-        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17",
+        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.19",
         "@types/bun": "^1.3.4",
         "@types/chrome": "^0.1.32",
         "typescript": "^5.9.3",
       },
       "peerDependencies": {
-        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17",
+        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.19",
       },
       "optionalPeers": [
         "@bsv/wallet-toolbox-mobile",
@@ -55,7 +55,7 @@
 
     "@bsv/wallet-toolbox": ["@bopen-io/wallet-toolbox@1.7.20-idb-fix.18", "", { "dependencies": { "@bsv/auth-express-middleware": "^1.2.3", "@bsv/payment-express-middleware": "^1.2.3", "@bsv/sdk": "^1.9.29", "express": "^4.21.2", "idb": "^8.0.2", "knex": "^3.1.0", "mysql2": "^3.12.0", "sqlite3": "^5.1.7", "ws": "^8.18.3" } }, "sha512-ocwZpvJeM23N97VvDL97BXpoi7t0OverF1QKrBIR295ZtiAWIagJE61mg9JI/u07UGNxGLoISKzQsu6CE98/3Q=="],
 
-    "@bsv/wallet-toolbox-mobile": ["@bopen-io/wallet-toolbox-mobile@file:../wallet-toolbox/mobile", { "dependencies": { "@bsv/sdk": "^1.9.29" } }],
+    "@bsv/wallet-toolbox-mobile": ["@bopen-io/wallet-toolbox-mobile@1.7.20-idb-fix.19", "", { "dependencies": { "@bsv/sdk": "^1.9.29" } }, "sha512-wmgb4/NdsNiRmdXzxOEPTu9tmAyBOhf36xH6DPoGt5mYwGasiJESjpH/9kuX0sVFjgx7b2FcatDzV3qFUczUWg=="],
 
     "@gar/promisify": ["@gar/promisify@1.1.3", "", {}, "sha512-k2Ty1JcVojjJFwrg/ThKi2ujJ7XNLYaFGNB/bWT9wGR+oSMJHMa5w+CUq6p/pVrKeNNgA7pCqEcjSnHVoqJQFw=="],
 

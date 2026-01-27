@@ -44,7 +44,7 @@
     "fflate": "^0.8.2"
   },
   "peerDependencies": {
-    "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17"
+    "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.19"
   },
   "peerDependenciesMeta": {
     "@bsv/wallet-toolbox-mobile": {
@@ -54,7 +54,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@^1.7.20-idb-fix.17",
-    "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.17",
+    "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.20-idb-fix.19",
     "@types/bun": "^1.3.4",
     "@types/chrome": "^0.1.32",
     "typescript": "^5.9.3"
