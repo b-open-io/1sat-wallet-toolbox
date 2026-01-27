@@ -148,29 +148,26 @@ export async function createWebWallet(
   const localStorage = new StorageIdb(storageOptions);
   await localStorage.migrate(DEFAULT_DATABASE_NAME, identityPubKey);
 
-  // 4. Create storage manager (local-only initially)
-  let storage = new WalletStorageManager(identityPubKey, localStorage);
-  await storage.makeAvailable();
-
-  // Track remote client for fullSync
+  // 4. Attempt remote storage connection BEFORE creating Wallet (if URL provided)
   let remoteClient: StorageClient | undefined;
-
-  // 5. Create the underlying Wallet
-  const underlyingWallet = new Wallet({
-    chain,
-    keyDeriver,
-    storage,
-    services: oneSatServices as unknown as MobileWalletServices,
-  });
-
-  // 6. Attempt remote storage connection if URL provided
   if (config.remoteStorageUrl) {
     console.log(
       `[createWebWallet] Attempting remote storage connection to ${config.remoteStorageUrl}`,
     );
     try {
+      // Create a temporary wallet just for StorageClient auth
+      // StorageClient needs a wallet to sign requests
+      const tempStorage = new WalletStorageManager(identityPubKey, localStorage);
+      await tempStorage.makeAvailable();
+      const tempWallet = new Wallet({
+        chain,
+        keyDeriver,
+        storage: tempStorage,
+        services: oneSatServices as unknown as MobileWalletServices,
+      });
+
       remoteClient = new StorageClient(
-        underlyingWallet as unknown as WalletInterface,
+        tempWallet as unknown as WalletInterface,
         config.remoteStorageUrl,
       );
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -180,107 +177,88 @@ export async function createWebWallet(
         ),
       );
       await Promise.race([remoteClient.makeAvailable(), timeoutPromise]);
-
-      // Remote connected - recreate storage manager with backup
-      storage = new WalletStorageManager(identityPubKey, localStorage, [
-        remoteClient,
-      ]);
-      await storage.makeAvailable();
-
-      // Check for conflicting actives and resolve if needed
-      const storageAny = storage as unknown as {
-        _active?: { settings?: { storageIdentityKey?: string } };
-        _backups?: Array<{ settings?: { storageIdentityKey?: string } }>;
-        _conflictingActives?: Array<{
-          settings?: { storageIdentityKey?: string };
-        }>;
-        setActive?: (
-          storageIdentityKey: string,
-          log?: (msg: string) => string,
-        ) => Promise<void>;
-        updateBackups?: (
-          activeSync?: unknown,
-          log?: (msg: string) => string,
-        ) => Promise<string>;
-      };
-      console.log("[createWebWallet] Storage state:", {
-        activeKey: storageAny._active?.settings?.storageIdentityKey,
-        backups: storageAny._backups?.map(
-          (b) => b.settings?.storageIdentityKey,
-        ),
-        conflictingActives: storageAny._conflictingActives?.map(
-          (c) => c.settings?.storageIdentityKey,
-        ),
-      });
-
-      // Only resolve actual conflicts, don't treat backups as conflicts
-      if (
-        storageAny._conflictingActives &&
-        storageAny._conflictingActives.length > 0
-      ) {
-        const localKey = storageAny._active?.settings?.storageIdentityKey;
-        if (localKey && storageAny.setActive) {
-          console.log("[createWebWallet] Resolving conflicting actives...");
-          try {
-            await storageAny.setActive(localKey, (msg: string) => {
-              console.log("[createWebWallet] Conflict resolution:", msg);
-              return msg;
-            });
-            console.log("[createWebWallet] Conflict resolution complete");
-          } catch (err: unknown) {
-            console.log(
-              "[createWebWallet] Conflict resolution failed:",
-              err instanceof Error ? err.message : err,
-            );
-          }
-        }
-      } else if (
-        storageAny._backups &&
-        storageAny._backups.length > 0 &&
-        storageAny.updateBackups
-      ) {
-        // No conflicts - push local state to remote backup (fire-and-forget)
-        console.log(
-          "[createWebWallet] Pushing local state to remote backup...",
-        );
-        storageAny
-          .updateBackups(undefined, (msg: string) => {
-            console.log("[createWebWallet] Backup:", msg);
-            return msg;
-          })
-          .then(() => {
-            console.log("[createWebWallet] Backup complete");
-          })
-          .catch((err: unknown) => {
-            console.log(
-              "[createWebWallet] Backup failed:",
-              err instanceof Error ? err.message : err,
-            );
-          });
-      }
-
-      // Update wallet's storage reference
-      (
-        underlyingWallet as unknown as { _storage: WalletStorageManager }
-      )._storage = storage;
       console.log("[createWebWallet] Remote storage connected successfully");
+
+      // Clean up temp wallet (don't destroy storage - we'll reuse localStorage)
+      await tempWallet.destroy();
     } catch (err) {
       console.log(
         "[createWebWallet] Remote storage connection failed:",
         err instanceof Error ? err.message : err,
       );
-      // Graceful degradation - continue with local only
+      remoteClient = undefined;
     }
   }
 
-  // 7. Wrap with permissions manager
+  // 5. Create storage manager with final configuration (local + remote if connected)
+  const backups = remoteClient ? [remoteClient] : [];
+  const storage = new WalletStorageManager(identityPubKey, localStorage, backups);
+  await storage.makeAvailable();
+
+  // Log storage state using public APIs
+  const stores = storage.getStores();
+  console.log("[createWebWallet] Storage state:", {
+    activeKey: storage.getActiveStore(),
+    backups: storage.getBackupStores(),
+    conflictingActives: storage.getConflictingStores(),
+    isActiveEnabled: storage.isActiveEnabled,
+    allStores: stores.map(s => ({ name: s.storageName, key: s.storageIdentityKey.slice(0, 16) + "..." })),
+  });
+
+  // 6. Handle conflicting actives or push to backups
+  const conflictingStores = storage.getConflictingStores();
+  const backupStores = storage.getBackupStores();
+
+  if (conflictingStores.length > 0) {
+    const localKey = storage.getActiveStore();
+    console.log("[createWebWallet] Resolving conflicting actives...");
+    try {
+      await storage.setActive(localKey, (msg: string) => {
+        console.log("[createWebWallet] Conflict resolution:", msg);
+        return msg;
+      });
+      console.log("[createWebWallet] Conflict resolution complete");
+    } catch (err: unknown) {
+      console.log(
+        "[createWebWallet] Conflict resolution failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  } else if (backupStores.length > 0) {
+    // No conflicts - push local state to remote backup (fire-and-forget)
+    console.log("[createWebWallet] Pushing local state to remote backup...");
+    storage
+      .updateBackups(undefined, (msg: string) => {
+        console.log("[createWebWallet] Backup:", msg);
+        return msg;
+      })
+      .then(() => {
+        console.log("[createWebWallet] Backup complete");
+      })
+      .catch((err: unknown) => {
+        console.log(
+          "[createWebWallet] Backup failed:",
+          err instanceof Error ? err.message : err,
+        );
+      });
+  }
+
+  // 7. Create the underlying Wallet with the FINAL storage configuration
+  const underlyingWallet = new Wallet({
+    chain,
+    keyDeriver,
+    storage,
+    services: oneSatServices as unknown as MobileWalletServices,
+  });
+
+  // 8. Wrap with permissions manager
   const wallet = new WalletPermissionsManager(
     underlyingWallet,
     adminOriginator,
     permissionsConfig,
   );
 
-  // 8. Create monitor (not started - consumer calls startTasks() when ready)
+  // 9. Create monitor (not started - consumer calls startTasks() when ready)
   const monitor = new Monitor({
     chain,
     services: oneSatServices as unknown as typeof fallbackServices,
@@ -294,24 +272,17 @@ export async function createWebWallet(
   });
   monitor.addDefaultTasks();
 
-  // Helper to sync to remote backup using updateBackups (same as initialization)
+  // Helper to sync to remote backup using public updateBackups API
   const syncToBackup = async (context: string): Promise<void> => {
-    const storageAny = storage as unknown as {
-      _backups?: unknown[];
-      updateBackups?: (
-        activeSync?: unknown,
-        log?: (msg: string) => string,
-      ) => Promise<string>;
-    };
-    if (storageAny._backups?.length && storageAny.updateBackups) {
-      await storageAny.updateBackups(undefined, (msg: string) => {
+    if (storage.getBackupStores().length > 0) {
+      await storage.updateBackups(undefined, (msg: string) => {
         console.log(`[Monitor] ${context}:`, msg);
         return msg;
       });
     }
   };
 
-  // 9. Wire up monitor callbacks - sync to remote first, then call user callbacks
+  // 10. Wire up monitor callbacks - sync to remote first, then call user callbacks
   monitor.onTransactionBroadcasted = async (result) => {
     console.log("[Monitor] Transaction broadcasted:", result.txid);
 
@@ -358,14 +329,14 @@ export async function createWebWallet(
     }
   };
 
-  // 10. Create cleanup function
+  // 11. Create cleanup function
   const destroy = async (): Promise<void> => {
     monitor.stopTasks();
     await monitor.destroy();
     await underlyingWallet.destroy();
   };
 
-  // 11. Create fullSync function if remote storage is connected
+  // 12. Create fullSync function if remote storage is connected
   const fullSyncFn = remoteClient
     ? async (onProgress?: (stage: FullSyncStage, message: string) => void): Promise<FullSyncResult> => {
         return fullSync({

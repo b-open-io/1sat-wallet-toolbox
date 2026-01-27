@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.39] - 2026-01-27
+
+### Fixed
+
+- **Remote storage architecture** - Restructured factory to build storage completely before creating Wallet. Previously, the factory created the Wallet first, then attempted to hack the storage reference afterward. Now the correct order is: create local storage → attempt remote connection → create WalletStorageManager with both → create Wallet with final configuration.
+- **Use public APIs** - Replaced type coercion hacks accessing private `_storage`, `_backups` properties with public `getBackupStores()`, `getConflictingStores()`, `getStores()`, `updateBackups()` methods.
+
 ## [0.0.38] - 2026-01-26
 
 ### Fixed
