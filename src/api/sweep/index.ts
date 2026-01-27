@@ -475,17 +475,25 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
 
       await tx.sign();
 
-      // Log signed transaction
+      // Log signed transaction details for debugging
+      const localTxid = tx.id("hex");
+      console.log(`[sweepOrdinals] === LOCAL SIGNED TX ===`);
+      console.log(`[sweepOrdinals] Local txid: ${localTxid}`);
       console.log(`[sweepOrdinals] Signed tx hex: ${tx.toHex()}`);
 
       // Extract unlocking scripts for signAction
       const spends: Record<number, { unlockingScript: string }> = {};
+      console.log(`[sweepOrdinals] === UNLOCKING SCRIPTS FOR SIGNACTION ===`);
       for (let i = 0; i < tx.inputs.length; i++) {
         const txInput = tx.inputs[i];
         const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
 
         if (ourOutpoints.has(inputOutpoint)) {
-          spends[i] = { unlockingScript: txInput.unlockingScript?.toHex() ?? "" };
+          const unlockHex = txInput.unlockingScript?.toHex() ?? "";
+          spends[i] = { unlockingScript: unlockHex };
+          console.log(`  [${i}] ${inputOutpoint}: ${unlockHex.length} chars`);
+        } else {
+          console.log(`  [${i}] ${inputOutpoint}: (wallet input - not ours)`);
         }
       }
 
@@ -497,6 +505,50 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
 
       if ("error" in signResult) {
         return { error: String(signResult.error) };
+      }
+
+      // Debug: compare local vs signAction result
+      console.log(`[sweepOrdinals] === SIGN ACTION RESULT ===`);
+      console.log(`[sweepOrdinals] signAction txid: ${signResult.txid}`);
+      // Log broadcast results if available
+      if ("sendWithResults" in signResult) {
+        console.log(`[sweepOrdinals] sendWithResults:`, JSON.stringify((signResult as { sendWithResults?: unknown }).sendWithResults));
+      }
+      console.log(`[sweepOrdinals] Local txid (partial): ${localTxid}`);
+      console.log(`[sweepOrdinals] Note: TXIDs differ because local is partial (wallet input unsigned)`);
+
+      if (signResult.tx) {
+        // Parse returned BEEF to show final transaction structure
+        const returnedTx = Transaction.fromBEEF(signResult.tx);
+        console.log(`[sweepOrdinals] === FINAL TX STRUCTURE (broadcast) ===`);
+        console.log(`[sweepOrdinals] Final inputs (${returnedTx.inputs.length}):`);
+        let returnedInputSats = 0;
+        for (let i = 0; i < returnedTx.inputs.length; i++) {
+          const inp = returnedTx.inputs[i];
+          const sats = inp.sourceTransaction?.outputs[inp.sourceOutputIndex]?.satoshis ?? 0;
+          returnedInputSats += sats;
+          const isOurs = ourOutpoints.has(`${inp.sourceTXID}.${inp.sourceOutputIndex}`);
+          console.log(`  [${i}] ${inp.sourceTXID?.slice(0,8)}...:${inp.sourceOutputIndex} = ${sats} sats, unlock=${inp.unlockingScript?.toHex().length ?? 0} chars ${isOurs ? "(ours)" : "(wallet fee)"}`);
+        }
+        console.log(`[sweepOrdinals] Final outputs (${returnedTx.outputs.length}):`);
+        let returnedOutputSats = 0;
+        for (let i = 0; i < returnedTx.outputs.length; i++) {
+          const out = returnedTx.outputs[i];
+          returnedOutputSats += out.satoshis ?? 0;
+          console.log(`  [${i}] ${out.satoshis} sats, script=${out.lockingScript?.toHex().length ?? 0} chars`);
+        }
+        const finalFee = returnedInputSats - returnedOutputSats;
+        console.log(`[sweepOrdinals] Final: Total in=${returnedInputSats}, Total out=${returnedOutputSats}, Fee=${finalFee} sats`);
+        console.log(`[sweepOrdinals] Final tx hex: ${returnedTx.toHex()}`);
+        console.log(`[sweepOrdinals] Final tx computed id: ${returnedTx.id("hex")}`);
+
+        // Check if fee seems too low (less than 1 sat/byte)
+        const txSize = returnedTx.toHex().length / 2;
+        const satPerByte = finalFee / txSize;
+        console.log(`[sweepOrdinals] Tx size: ${txSize} bytes, Fee rate: ${satPerByte.toFixed(2)} sat/byte`);
+        if (satPerByte < 0.5) {
+          console.warn(`[sweepOrdinals] WARNING: Fee rate seems very low!`);
+        }
       }
 
       return {
@@ -706,6 +758,18 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
 
       if ("error" in signResult) {
         return { error: String(signResult.error) };
+      }
+
+      // Submit to overlay service for indexing
+      if (signResult.tx) {
+        try {
+          const services = ctx.services as import("../../services/OneSatServices").OneSatServices;
+          const overlayResult = await services.overlay.submitBsv21(signResult.tx, tokenId);
+          console.log(`[sweepBsv21] Overlay submission result:`, overlayResult);
+        } catch (overlayError) {
+          // Log but don't fail the sweep - tx is already broadcast
+          console.warn(`[sweepBsv21] Overlay submission failed:`, overlayError);
+        }
       }
 
       return {

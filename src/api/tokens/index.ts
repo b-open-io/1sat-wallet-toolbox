@@ -456,6 +456,17 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         return { error: String(signResult.error) };
       }
 
+      // Submit to overlay service for indexing
+      if (signResult.tx && ctx.services) {
+        try {
+          const services = ctx.services as import("../../services/OneSatServices").OneSatServices;
+          const overlayResult = await services.overlay.submitBsv21(signResult.tx, tokenId);
+          console.log(`[sendBsv21] Overlay submission result:`, overlayResult);
+        } catch (overlayError) {
+          console.warn(`[sendBsv21] Overlay submission failed:`, overlayError);
+        }
+      }
+
       return {
         txid: signResult.txid,
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
@@ -621,6 +632,17 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
 
       if ("error" in signResult) {
         return { error: String(signResult.error) };
+      }
+
+      // Submit to overlay service for indexing
+      if (signResult.tx && ctx.services) {
+        try {
+          const services = ctx.services as import("../../services/OneSatServices").OneSatServices;
+          const overlayResult = await services.overlay.submitBsv21(signResult.tx, tokenId);
+          console.log(`[purchaseBsv21] Overlay submission result:`, overlayResult);
+        } catch (overlayError) {
+          console.warn(`[purchaseBsv21] Overlay submission failed:`, overlayError);
+        }
       }
 
       return {
