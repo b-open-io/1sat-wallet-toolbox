@@ -47,7 +47,7 @@ export interface WebWalletConfig {
   adminOriginator: string;
   /** Permission configuration for WalletPermissionsManager */
   permissionsConfig: PermissionsManagerConfig;
-  /** Fee model. Default: { model: 'sat/kb', value: 1 } */
+  /** Fee model. Default: { model: 'sat/kb', value: 100 } */
   feeModel?: { model: "sat/kb"; value: number };
   /** Remote storage URL. If provided, attempts to connect for cloud backup. */
   remoteStorageUrl?: string;
@@ -290,14 +290,39 @@ export async function createWebWallet(
   });
   monitor.addDefaultTasks();
 
-  // 9. Create cleanup function
+  // 9. Wire up monitor callbacks to sync to remote backup
+  if (remoteClient) {
+    monitor.onTransactionBroadcasted = async (result) => {
+      console.log("[Monitor] Transaction broadcasted:", result.txid);
+      try {
+        const auth = await storage.getAuth();
+        await storage.syncToWriter(auth, remoteClient);
+        console.log("[Monitor] Synced to backup after broadcast");
+      } catch (err) {
+        console.warn("[Monitor] Failed to sync after broadcast:", err);
+      }
+    };
+
+    monitor.onTransactionProven = async (status) => {
+      console.log("[Monitor] Transaction proven:", status.txid, "block", status.blockHeight);
+      try {
+        const auth = await storage.getAuth();
+        await storage.syncToWriter(auth, remoteClient);
+        console.log("[Monitor] Synced to backup after confirmation");
+      } catch (err) {
+        console.warn("[Monitor] Failed to sync after confirmation:", err);
+      }
+    };
+  }
+
+  // 10. Create cleanup function
   const destroy = async (): Promise<void> => {
     monitor.stopTasks();
     await monitor.destroy();
     await underlyingWallet.destroy();
   };
 
-  // 10. Create fullSync function if remote storage is connected
+  // 11. Create fullSync function if remote storage is connected
   const fullSyncFn = remoteClient
     ? async (onProgress?: (stage: FullSyncStage, message: string) => void): Promise<FullSyncResult> => {
         return fullSync({
