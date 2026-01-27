@@ -125,6 +125,8 @@ export async function fullSync(
     console.log("=== END CHECKPOINT 2 ===");
 
     // Send chunk to remote
+    const chunkJson = JSON.stringify(chunk);
+    console.log(`[PUSH] Chunk size: ${(chunkJson.length / 1024).toFixed(1)} KB`);
     console.log("[PUSH] Sending chunk to remote...");
     const result = await remoteStorage.processSyncChunk(args, chunk);
     console.log(
