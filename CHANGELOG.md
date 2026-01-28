@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.55] - 2026-01-28
+
+### Changed
+
+- Renamed `listOrdinals` to `getOrdinals` - now returns `{ outputs, BEEF }` instead of just outputs
+- `getOrdinals` includes BEEF with each page for spending ordinals
+
 ## [0.0.41] - 2026-01-27
 
 ### Fixed

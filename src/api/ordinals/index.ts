@@ -388,26 +388,32 @@ export async function buildListOrdinal(
 // Skills
 // ============================================================================
 
-/** Input for listOrdinals skill */
-export interface ListOrdinalsInput {
+/** Input for getOrdinals skill */
+export interface GetOrdinalsInput {
   /** Max number of ordinals to return */
   limit?: number;
   /** Offset for pagination */
   offset?: number;
 }
 
+/** Result from getOrdinals skill */
+export interface GetOrdinalsResult {
+  outputs: WalletOutput[];
+  BEEF?: number[];
+}
+
 /**
- * List ordinals from the wallet.
+ * Get ordinals from the wallet with BEEF for spending.
  */
-export const listOrdinals: Skill<ListOrdinalsInput, WalletOutput[]> = {
+export const getOrdinals: Skill<GetOrdinalsInput, GetOrdinalsResult> = {
   meta: {
-    name: "listOrdinals",
-    description: "List ordinals/inscriptions from the wallet",
+    name: "getOrdinals",
+    description: "Get ordinals/inscriptions from the wallet with BEEF for spending",
     category: "ordinals",
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", description: "Max number of ordinals to return (default: 100)" },
+        limit: { type: "integer", description: "Max ordinals to return (default: 100)" },
         offset: { type: "integer", description: "Offset for pagination (default: 0)" },
       },
     },
@@ -417,10 +423,14 @@ export const listOrdinals: Skill<ListOrdinalsInput, WalletOutput[]> = {
       basket: ORDINALS_BASKET,
       includeTags: true,
       includeCustomInstructions: true,
+      include: 'entire transactions',
       limit: input.limit ?? 100,
       offset: input.offset ?? 0,
     });
-    return result.outputs;
+    return {
+      outputs: result.outputs,
+      BEEF: result.BEEF,
+    };
   },
 };
 
@@ -944,7 +954,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
 
 /** All ordinals skills for registry */
 export const ordinalsSkills = [
-  listOrdinals,
+  getOrdinals,
   deriveCancelAddress,
   transferOrdinals,
   listOrdinal,
