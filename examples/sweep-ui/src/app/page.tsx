@@ -2347,7 +2347,6 @@ export default function SweepPage() {
         onCreateDestWallet={createDestWallet}
         onDestroyDestWallet={destroyDestWallet}
         destWalletLoading={destWalletLoading}
-        cwiWallet={wallet}
       />
     </div>
   );
