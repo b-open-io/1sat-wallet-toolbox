@@ -487,6 +487,13 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
         return params;
       }
 
+      console.log("[transferOrdinals] params:", JSON.stringify({
+        description: params.description,
+        inputBEEF: params.inputBEEF ? `[${params.inputBEEF.length} bytes]` : "undefined",
+        inputs: params.inputs,
+        outputs: params.outputs?.map(o => ({ ...o, lockingScript: o.lockingScript?.slice(0, 20) + "..." })),
+      }, null, 2));
+
       const createResult = await ctx.wallet.createAction({
         ...params,
         options: { signAndProcess: false, randomizeOutputs: false },

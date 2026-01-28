@@ -265,6 +265,7 @@ export async function createWebWallet(
     unprovenAttemptsLimitMain: 144,
   });
   monitor.addDefaultTasks();
+  console.log("[createWebWallet] Monitor created with tasks:", monitor["_tasks"].map((t: { name: string }) => t.name));
 
   // Helper to sync to remote backup using public updateBackups API
   const syncToBackup = async (context: string): Promise<void> => {
