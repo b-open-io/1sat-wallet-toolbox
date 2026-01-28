@@ -410,13 +410,40 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
 
       // Create action to get signable transaction
       // CRITICAL: randomizeOutputs must be false to preserve ordinal satoshi positions
-      const createResult = await ctx.wallet.createAction({
+      const createActionArgs = {
         description: `Sweep ${inputs.length} ordinal${inputs.length !== 1 ? "s" : ""}`,
         inputBEEF: beefData,
         inputs: inputDescriptors,
         outputs,
         options: { signAndProcess: false, randomizeOutputs: false },
-      });
+      };
+
+      console.log(`[sweepOrdinals] === CREATE ACTION ARGS ===`);
+      console.log(`[sweepOrdinals] description: ${createActionArgs.description}`);
+      console.log(`[sweepOrdinals] inputBEEF length: ${beefData.length} bytes`);
+      console.log(`[sweepOrdinals] inputs count: ${inputDescriptors.length}`);
+      console.log(`[sweepOrdinals] outputs count: ${outputs.length}`);
+      console.log(`[sweepOrdinals] inputs:`, JSON.stringify(inputDescriptors, null, 2));
+      console.log(`[sweepOrdinals] outputs:`, JSON.stringify(outputs, null, 2));
+      console.log(`[sweepOrdinals] options:`, JSON.stringify(createActionArgs.options));
+      console.log(`[sweepOrdinals] Calling createAction...`);
+
+      let createResult;
+      try {
+        createResult = await ctx.wallet.createAction(createActionArgs);
+        console.log(`[sweepOrdinals] createAction returned:`, JSON.stringify(createResult, (key, value) => {
+          // Don't stringify large binary data
+          if (key === 'tx' && value instanceof Uint8Array) return `<Uint8Array ${value.length} bytes>`;
+          if (key === 'tx' && Array.isArray(value)) return `<Array ${value.length} bytes>`;
+          return value;
+        }, 2));
+      } catch (createError) {
+        console.error(`[sweepOrdinals] createAction threw:`, createError);
+        const errorMsg = createError instanceof Error ? createError.message : String(createError);
+        const errorStack = createError instanceof Error ? createError.stack : undefined;
+        console.error(`[sweepOrdinals] Stack:`, errorStack);
+        return { error: `createAction failed: ${errorMsg}` };
+      }
 
       if ("error" in createResult && createResult.error) {
         return { error: String(createResult.error) };
