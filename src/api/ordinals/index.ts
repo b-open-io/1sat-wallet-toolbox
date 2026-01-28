@@ -494,6 +494,20 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
         outputs: params.outputs?.map(o => ({ ...o, lockingScript: o.lockingScript?.slice(0, 20) + "..." })),
       }, null, 2));
 
+      // Debug: Check if BEEF contains the source transactions
+      try {
+        const { Beef } = await import("@bsv/sdk");
+        const beef = Beef.fromBinary(params.inputBEEF as number[]);
+        console.log("[transferOrdinals] BEEF tx count:", beef.txs.length);
+        for (const inp of params.inputs ?? []) {
+          const [txid] = inp.outpoint.split(".");
+          const sourceTx = beef.findTxid(txid);
+          console.log(`[transferOrdinals] Source tx for ${inp.outpoint}: ${sourceTx ? "FOUND" : "MISSING"}`);
+        }
+      } catch (e) {
+        console.log("[transferOrdinals] BEEF parse error:", e);
+      }
+
       const createResult = await ctx.wallet.createAction({
         ...params,
         options: { signAndProcess: false, randomizeOutputs: false },
