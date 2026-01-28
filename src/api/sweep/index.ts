@@ -203,7 +203,6 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
       // If no amount specified, no outputs - wallet creates change for everything
 
       // Step 1: Create action to get the signable transaction
-      // noSend: true bypasses spendable check for external inputs
       const createResult = await ctx.wallet.createAction({
         description: amount
           ? `Sweep ${amount} sats`
@@ -211,7 +210,7 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
         inputBEEF: beefData,
         inputs: inputDescriptors,
         outputs,
-        options: { signAndProcess: false, noSend: true },
+        options: { signAndProcess: false },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -269,11 +268,9 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
       }
 
       // Step 3: Complete the action with our signatures
-      // Override noSend to false to ensure broadcast (createAction used noSend:true to bypass spendable check)
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
-        options: { noSend: false },
       });
 
       if ("error" in signResult) {
@@ -358,10 +355,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         firstBeef.mergeBeef(additionalBeef);
       }
 
-      console.log(`[sweepOrdinals] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}, bumps=${firstBeef.bumps.length}`);
-      for (const btx of firstBeef.txs) {
-        console.log(`[sweepOrdinals]   tx ${btx.txid.slice(0,16)}... bumpIndex=${btx.bumpIndex}`);
-      }
+      console.log(`[sweepOrdinals] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`);
 
       // Build input descriptors
       const inputDescriptors = inputs.map((input) => {
@@ -421,7 +415,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         inputBEEF: beefData,
         inputs: inputDescriptors,
         outputs,
-        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
+        options: { signAndProcess: false, randomizeOutputs: false },
       };
 
       console.log(`[sweepOrdinals] === CREATE ACTION ARGS ===`);
@@ -531,11 +525,9 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
       }
 
       // Complete the action with our signatures
-      // Override noSend to false to ensure broadcast (createAction used noSend:true to bypass spendable check)
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
-        options: { noSend: false },
       });
 
       if ("error" in signResult) {
@@ -736,7 +728,7 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         inputBEEF: beefData,
         inputs: inputDescriptors,
         outputs,
-        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
+        options: { signAndProcess: false, randomizeOutputs: false },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -786,11 +778,9 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
       }
 
       // Complete the action with our signatures
-      // Override noSend to false to ensure broadcast (createAction used noSend:true to bypass spendable check)
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
-        options: { noSend: false },
       });
 
       if ("error" in signResult) {
