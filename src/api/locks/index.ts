@@ -301,7 +301,7 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
           },
         ],
         lockTime: maxUntil,
-        options: { signAndProcess: false },
+        options: { signAndProcess: false, noSend: true },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -365,6 +365,7 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {

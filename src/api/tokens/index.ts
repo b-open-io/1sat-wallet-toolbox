@@ -436,7 +436,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
           inputDescription: "Token input",
         })),
         outputs,
-        options: { signAndProcess: false, randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -450,6 +450,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends: {},
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {
@@ -603,7 +604,7 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
           },
         ],
         outputs,
-        options: { signAndProcess: false, randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -628,6 +629,7 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
         spends: {
           0: { unlockingScript: unlockingScript.toHex() },
         },
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {

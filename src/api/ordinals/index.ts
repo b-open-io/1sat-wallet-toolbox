@@ -489,7 +489,7 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
 
       const createResult = await ctx.wallet.createAction({
         ...params,
-        options: { signAndProcess: false, randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
       });
 
       if (!createResult.signableTransaction) {
@@ -516,6 +516,7 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {
@@ -560,7 +561,7 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
 
       const createResult = await ctx.wallet.createAction({
         ...params,
-        options: { signAndProcess: false, randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
       });
 
       if (!createResult.signableTransaction) {
@@ -579,6 +580,7 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends: { 0: { unlockingScript: unlocking } },
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {
@@ -661,7 +663,7 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
             customInstructions: JSON.stringify({ protocolID, keyID, ...(listingName && { name: listingName }) }),
           },
         ],
-        options: { signAndProcess: false, randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -726,6 +728,7 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
         spends: {
           0: { unlockingScript: unlockingScript.toHex() },
         },
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {
@@ -876,7 +879,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
           },
         ],
         outputs,
-        options: { signAndProcess: false, randomizeOutputs: false },
+        options: { signAndProcess: false, randomizeOutputs: false, noSend: true },
       });
 
       if ("error" in createResult && createResult.error) {
@@ -901,6 +904,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         spends: {
           0: { unlockingScript: unlockingScript.toHex() },
         },
+        options: { noSend: false },
       });
 
       if ("error" in signResult) {
