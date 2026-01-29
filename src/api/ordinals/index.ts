@@ -547,6 +547,7 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {
@@ -610,6 +611,7 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = 
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends: { 0: { unlockingScript: unlocking } },
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {
@@ -757,6 +759,7 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
         spends: {
           0: { unlockingScript: unlockingScript.toHex() },
         },
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {
@@ -932,6 +935,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         spends: {
           0: { unlockingScript: unlockingScript.toHex() },
         },
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {

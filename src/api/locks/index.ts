@@ -204,6 +204,7 @@ export const lockBsv: Skill<LockBsvInput, LockOperationResponse> = {
       const result = await ctx.wallet.createAction({
         description: `Lock BSV in ${requests.length} output(s)`,
         outputs,
+        options: { signAndProcess: true, acceptDelayedBroadcast: false },
       });
 
       if (!result.txid) {
@@ -365,6 +366,7 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {

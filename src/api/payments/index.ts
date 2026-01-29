@@ -142,7 +142,7 @@ export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
       const result = await ctx.wallet.createAction({
         description: `Send ${requests.length} payment(s)`,
         outputs,
-        options: { signAndProcess: true },
+        options: { signAndProcess: true, acceptDelayedBroadcast: false },
       });
 
       if (!result.txid) {
@@ -220,7 +220,7 @@ export const sendAllBsv: Skill<SendAllBsvInput, SendBsvResponse> = {
             outputDescription: "Sweep all funds",
           },
         ],
-        options: { signAndProcess: true },
+        options: { signAndProcess: true, acceptDelayedBroadcast: false },
       });
 
       if (!result.txid) {

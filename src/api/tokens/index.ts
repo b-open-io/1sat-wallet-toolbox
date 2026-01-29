@@ -450,6 +450,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends: {},
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {
@@ -628,6 +629,7 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
         spends: {
           0: { unlockingScript: unlockingScript.toHex() },
         },
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {

@@ -271,6 +271,7 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {
@@ -528,6 +529,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {
@@ -781,6 +783,7 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
       const signResult = await ctx.wallet.signAction({
         reference: createResult.signableTransaction.reference,
         spends,
+        options: { acceptDelayedBroadcast: false },
       });
 
       if ("error" in signResult) {

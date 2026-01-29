@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.56] - 2026-01-29
+
+### Changed
+
+- Force synchronous broadcast with `acceptDelayedBroadcast: false` on all API methods
+- Transactions now broadcast immediately instead of being queued for async broadcast (5-10s delay)
+- Provides immediate success/failure feedback to users
+
 ## [0.0.55] - 2026-01-28
 
 ### Changed

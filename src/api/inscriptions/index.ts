@@ -110,6 +110,7 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
             }),
           },
         ],
+        options: { signAndProcess: true, acceptDelayedBroadcast: false },
       });
 
       if (!result.txid) {
