@@ -398,6 +398,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         lockingScript: p2pkh.lock(fundAddress).toHex(),
         satoshis: BSV21_FEE_SATS,
         outputDescription: "Overlay processing fee",
+        tags: [],
       });
 
       const change = totalIn - amount;
@@ -580,6 +581,7 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
         lockingScript: payoutLockingScript.toHex(),
         satoshis: payoutSatoshis,
         outputDescription: "Payment to seller",
+        tags: [],
       });
 
       if (marketplaceAddress && marketplaceRate && marketplaceRate > 0) {
@@ -589,6 +591,7 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
             lockingScript: p2pkh.lock(marketplaceAddress).toHex(),
             satoshis: marketFee,
             outputDescription: "Marketplace fee",
+            tags: [],
           });
         }
       }

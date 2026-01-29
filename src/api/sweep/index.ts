@@ -720,6 +720,7 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         lockingScript: p2pkh.lock(fundAddress).toHex(),
         satoshis: BSV21_FEE_SATS,
         outputDescription: "Overlay processing fee",
+        tags: [],
       });
 
       const beefData = firstBeef.toBinary();

@@ -136,6 +136,7 @@ export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
           lockingScript: lockingScript.toHex(),
           satoshis: req.satoshis,
           outputDescription: `Payment of ${req.satoshis} sats`,
+          tags: [],
         });
       }
 

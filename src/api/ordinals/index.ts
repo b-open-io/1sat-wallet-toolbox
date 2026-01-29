@@ -323,6 +323,7 @@ export async function buildTransferOrdinals(
         lockingScript: new P2PKH().lock(recipientAddress).toHex(),
         satoshis: 1,
         outputDescription: "Ordinal transfer to external address",
+        tags: [],
       });
     }
   }
@@ -886,6 +887,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         lockingScript: payoutLockingScript.toHex(),
         satoshis: payoutSatoshis,
         outputDescription: "Payment to seller",
+        tags: [],
       });
 
       if (marketplaceAddress && marketplaceRate && marketplaceRate > 0) {
@@ -895,6 +897,7 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
             lockingScript: p2pkh.lock(marketplaceAddress).toHex(),
             satoshis: marketFee,
             outputDescription: "Marketplace fee",
+            tags: [],
           });
         }
       }
