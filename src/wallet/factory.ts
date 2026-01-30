@@ -51,6 +51,8 @@ export interface WebWalletConfig {
   feeModel?: { model: "sat/kb"; value: number };
   /** Remote storage URL. If provided, attempts to connect for cloud backup. */
   remoteStorageUrl?: string;
+  /** Device ID for sync isolation. Each device should have a unique ID to prevent sync corruption. */
+  deviceId?: string;
   /** Callback when a transaction is broadcasted (called after remote sync if connected) */
   onTransactionBroadcasted?: (txid: string) => void;
   /** Callback when a transaction is proven (called after remote sync if connected) */
@@ -173,9 +175,11 @@ export async function createWebWallet(
     try {
       // Create StorageClient with the REAL wallet (not a temp wallet)
       // StorageClient captures the wallet at construction for signing requests
+      // deviceId isolates sync state per device to prevent ID mapping corruption
       remoteClient = new StorageClient(
         underlyingWallet as unknown as WalletInterface,
         config.remoteStorageUrl,
+        config.deviceId,
       );
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
