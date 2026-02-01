@@ -111,7 +111,10 @@ export interface SyncQueueStorage {
    * @param status - Status to filter by
    * @param limit - Maximum number of items to return (default: 100)
    */
-  getByStatus(status: SyncQueueItemStatus, limit?: number): Promise<SyncQueueItem[]>;
+  getByStatus(
+    status: SyncQueueItemStatus,
+    limit?: number,
+  ): Promise<SyncQueueItem[]>;
 
   /**
    * Get queue statistics.

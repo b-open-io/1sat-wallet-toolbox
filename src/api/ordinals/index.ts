@@ -5,8 +5,10 @@
  * Returns WalletOutput[] directly from the SDK - no custom mapping needed.
  */
 
+import { OrdLock } from "@bopen-io/templates";
 import {
   BigNumber,
+  type CreateActionArgs,
   Hash,
   LockingScript,
   OP,
@@ -19,11 +21,14 @@ import {
   Utils,
   type WalletOutput,
   type WalletProtocol,
-  type CreateActionArgs,
 } from "@bsv/sdk";
-import { OrdLock } from "@bopen-io/templates";
-import type { Skill, OneSatContext } from "../skills/types";
-import { ORDINALS_BASKET, ORDLOCK_PREFIX, ORDLOCK_SUFFIX, ONESAT_PROTOCOL } from "../constants";
+import {
+  ONESAT_PROTOCOL,
+  ORDINALS_BASKET,
+  ORDLOCK_PREFIX,
+  ORDLOCK_SUFFIX,
+} from "../constants";
+import type { OneSatContext, Skill } from "../skills/types";
 
 // ============================================================================
 // Helpers
@@ -52,7 +57,9 @@ async function signP2PKHInput(
 ): Promise<string | { error: string }> {
   const txInput = tx.inputs[inputIndex];
 
-  const sourceLockingScript = txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]?.lockingScript;
+  const sourceLockingScript =
+    txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]
+      ?.lockingScript;
   if (!sourceLockingScript) {
     return { error: `missing-source-locking-script-for-input-${inputIndex}` };
   }
@@ -67,17 +74,20 @@ async function signP2PKHInput(
     sourceOutputIndex: txInput.sourceOutputIndex,
     sourceSatoshis: 1,
     transactionVersion: tx.version,
-    otherInputs: tx.inputs.filter((_, idx) => idx !== inputIndex).map((inp) => ({
-      sourceTXID: inp.sourceTXID ?? inp.sourceTransaction?.id("hex") ?? "",
-      sourceOutputIndex: inp.sourceOutputIndex,
-      sequence: inp.sequence ?? 0xffffffff,
-    })),
+    otherInputs: tx.inputs
+      .filter((_, idx) => idx !== inputIndex)
+      .map((inp) => ({
+        sourceTXID: inp.sourceTXID ?? inp.sourceTransaction?.id("hex") ?? "",
+        sourceOutputIndex: inp.sourceOutputIndex,
+        sequence: inp.sequence ?? 0xffffffff,
+      })),
     inputIndex,
     outputs: tx.outputs,
     inputSequence: txInput.sequence ?? 0xffffffff,
     subscript: sourceLockingScript,
     lockTime: tx.lockTime,
-    scope: TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID,
+    scope:
+      TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID,
   });
 
   const sighash = Hash.sha256(Hash.sha256(preimage));
@@ -95,7 +105,10 @@ async function signP2PKHInput(
     forSelf: true,
   });
 
-  const sigWithHashtype = [...signature, TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID];
+  const sigWithHashtype = [
+    ...signature,
+    TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID,
+  ];
 
   return new UnlockingScript()
     .writeBin(sigWithHashtype)
@@ -173,7 +186,11 @@ async function deriveCancelAddressInternal(
   return PublicKey.fromString(result.publicKey).toAddress();
 }
 
-function buildOrdLockScript(ordAddress: string, payAddress: string, price: number): Script {
+function buildOrdLockScript(
+  ordAddress: string,
+  payAddress: string,
+  price: number,
+): Script {
   const cancelPkh = Utils.fromBase58Check(ordAddress).data as number[];
   const payPkh = Utils.fromBase58Check(payAddress).data as number[];
   const payoutScript = new P2PKH().lock(payPkh).toBinary();
@@ -210,13 +227,21 @@ async function buildPurchaseUnlockingScript(
   }
 
   const script = new UnlockingScript().writeBin(
-    buildSerializedOutput(tx.outputs[0].satoshis ?? 0, tx.outputs[0].lockingScript.toBinary()),
+    buildSerializedOutput(
+      tx.outputs[0].satoshis ?? 0,
+      tx.outputs[0].lockingScript.toBinary(),
+    ),
   );
 
   if (tx.outputs.length > 2) {
     const writer = new Utils.Writer();
     for (const output of tx.outputs.slice(2)) {
-      writer.write(buildSerializedOutput(output.satoshis ?? 0, output.lockingScript.toBinary()));
+      writer.write(
+        buildSerializedOutput(
+          output.satoshis ?? 0,
+          output.lockingScript.toBinary(),
+        ),
+      );
     }
     script.writeBin(writer.toArray());
   } else {
@@ -293,14 +318,22 @@ export async function buildTransferOrdinals(
     // Preserve important tags from source output
     const tags: string[] = [];
     for (const tag of ordinal.tags ?? []) {
-      if (tag.startsWith("type:") || tag.startsWith("origin:") || tag.startsWith("name:")) {
+      if (
+        tag.startsWith("type:") ||
+        tag.startsWith("origin:") ||
+        tag.startsWith("name:")
+      ) {
         tags.push(tag);
       }
     }
 
     const sourceName = extractName(ordinal.customInstructions);
 
-    inputs!.push({ outpoint, inputDescription: "Ordinal to transfer", unlockingScriptLength: 108 });
+    inputs!.push({
+      outpoint,
+      inputDescription: "Ordinal to transfer",
+      unlockingScriptLength: 108,
+    });
 
     // Only track output in wallet when transferring to a counterparty (wallet can derive keys to spend it)
     // External address transfers are NOT tracked since the wallet cannot spend them
@@ -329,7 +362,10 @@ export async function buildTransferOrdinals(
   }
 
   return {
-    description: transfers.length === 1 ? "Transfer ordinal" : `Transfer ${transfers.length} ordinals`,
+    description:
+      transfers.length === 1
+        ? "Transfer ordinal"
+        : `Transfer ${transfers.length} ordinals`,
     inputBEEF,
     inputs,
     outputs,
@@ -360,14 +396,24 @@ export async function buildListOrdinal(
   const cancelAddress = await deriveCancelAddressInternal(ctx, outpoint);
   const lockingScript = buildOrdLockScript(cancelAddress, payAddress, price);
 
-  const tags: string[] = ["ordlock", `origin:${originOutpoint}`, `price:${price}`];
+  const tags: string[] = [
+    "ordlock",
+    `origin:${originOutpoint}`,
+    `price:${price}`,
+  ];
   if (typeTag) tags.push(typeTag);
   if (nameTag) tags.push(nameTag);
 
   return {
     description: `List ordinal for ${price} sats`,
     inputBEEF,
-    inputs: [{ outpoint, inputDescription: "Ordinal to list", unlockingScriptLength: 108 }],
+    inputs: [
+      {
+        outpoint,
+        inputDescription: "Ordinal to list",
+        unlockingScriptLength: 108,
+      },
+    ],
     outputs: [
       {
         lockingScript: lockingScript.toHex(),
@@ -409,13 +455,20 @@ export interface GetOrdinalsResult {
 export const getOrdinals: Skill<GetOrdinalsInput, GetOrdinalsResult> = {
   meta: {
     name: "getOrdinals",
-    description: "Get ordinals/inscriptions from the wallet with BEEF for spending",
+    description:
+      "Get ordinals/inscriptions from the wallet with BEEF for spending",
     category: "ordinals",
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", description: "Max ordinals to return (default: 100)" },
-        offset: { type: "integer", description: "Offset for pagination (default: 0)" },
+        limit: {
+          type: "integer",
+          description: "Max ordinals to return (default: 100)",
+        },
+        offset: {
+          type: "integer",
+          description: "Offset for pagination (default: 0)",
+        },
       },
     },
   },
@@ -424,7 +477,7 @@ export const getOrdinals: Skill<GetOrdinalsInput, GetOrdinalsResult> = {
       basket: ORDINALS_BASKET,
       includeTags: true,
       includeCustomInstructions: true,
-      include: 'entire transactions',
+      include: "entire transactions",
       limit: input.limit ?? 100,
       offset: input.offset ?? 0,
     });
@@ -452,7 +505,10 @@ export const deriveCancelAddress: Skill<DeriveCancelAddressInput, string> = {
     inputSchema: {
       type: "object",
       properties: {
-        outpoint: { type: "string", description: "Outpoint of the ordinal listing" },
+        outpoint: {
+          type: "string",
+          description: "Outpoint of the ordinal listing",
+        },
       },
       required: ["outpoint"],
     },
@@ -465,7 +521,10 @@ export const deriveCancelAddress: Skill<DeriveCancelAddressInput, string> = {
 /**
  * Transfer an ordinal to a new owner.
  */
-export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationResponse> = {
+export const transferOrdinals: Skill<
+  TransferOrdinalsRequest,
+  OrdinalOperationResponse
+> = {
   meta: {
     name: "transferOrdinals",
     description: "Transfer one or more ordinals to new owners",
@@ -479,14 +538,27 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
           items: {
             type: "object",
             properties: {
-              ordinal: { type: "object", description: "WalletOutput from listOutputs" },
-              counterparty: { type: "string", description: "Recipient identity public key (hex)" },
-              address: { type: "string", description: "Recipient P2PKH address" },
+              ordinal: {
+                type: "object",
+                description: "WalletOutput from listOutputs",
+              },
+              counterparty: {
+                type: "string",
+                description: "Recipient identity public key (hex)",
+              },
+              address: {
+                type: "string",
+                description: "Recipient P2PKH address",
+              },
             },
             required: ["ordinal"],
           },
         },
-        inputBEEF: { type: "array", description: "BEEF from listOutputs with include: 'entire transactions'" },
+        inputBEEF: {
+          type: "array",
+          description:
+            "BEEF from listOutputs with include: 'entire transactions'",
+        },
       },
       required: ["transfers", "inputBEEF"],
     },
@@ -498,12 +570,24 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
         return params;
       }
 
-      console.log("[transferOrdinals] params:", JSON.stringify({
-        description: params.description,
-        inputBEEF: params.inputBEEF ? `[${params.inputBEEF.length} bytes]` : "undefined",
-        inputs: params.inputs,
-        outputs: params.outputs?.map(o => ({ ...o, lockingScript: o.lockingScript?.slice(0, 20) + "..." })),
-      }, null, 2));
+      console.log(
+        "[transferOrdinals] params:",
+        JSON.stringify(
+          {
+            description: params.description,
+            inputBEEF: params.inputBEEF
+              ? `[${params.inputBEEF.length} bytes]`
+              : "undefined",
+            inputs: params.inputs,
+            outputs: params.outputs?.map((o) => ({
+              ...o,
+              lockingScript: o.lockingScript?.slice(0, 20) + "...",
+            })),
+          },
+          null,
+          2,
+        ),
+      );
 
       // Debug: Check if BEEF contains the source transactions
       try {
@@ -513,7 +597,9 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
         for (const inp of params.inputs ?? []) {
           const [txid] = inp.outpoint.split(".");
           const sourceTx = beef.findTxid(txid);
-          console.log(`[transferOrdinals] Source tx for ${inp.outpoint}: ${sourceTx ? "FOUND" : "MISSING"}`);
+          console.log(
+            `[transferOrdinals] Source tx for ${inp.outpoint}: ${sourceTx ? "FOUND" : "MISSING"}`,
+          );
         }
       } catch (e) {
         console.log("[transferOrdinals] BEEF parse error:", e);
@@ -533,12 +619,18 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
 
       for (let i = 0; i < input.transfers.length; i++) {
         const { ordinal } = input.transfers[i];
-        console.log(`[transferOrdinals] Input ${i}: outpoint=${ordinal.outpoint}, customInstructions=${ordinal.customInstructions}`);
+        console.log(
+          `[transferOrdinals] Input ${i}: outpoint=${ordinal.outpoint}, customInstructions=${ordinal.customInstructions}`,
+        );
         if (!ordinal.customInstructions) {
-          return { error: `missing-custom-instructions-for-${ordinal.outpoint}` };
+          return {
+            error: `missing-custom-instructions-for-${ordinal.outpoint}`,
+          };
         }
         const { protocolID, keyID } = JSON.parse(ordinal.customInstructions);
-        console.log(`[transferOrdinals] Input ${i}: protocolID=${JSON.stringify(protocolID)}, keyID=${keyID}`);
+        console.log(
+          `[transferOrdinals] Input ${i}: protocolID=${JSON.stringify(protocolID)}, keyID=${keyID}`,
+        );
 
         const unlocking = await signP2PKHInput(ctx, tx, i, protocolID, keyID);
         if (typeof unlocking !== "string") return unlocking;
@@ -560,7 +652,9 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };
@@ -568,66 +662,81 @@ export const transferOrdinals: Skill<TransferOrdinalsRequest, OrdinalOperationRe
 /**
  * List an ordinal for sale on the global orderbook.
  */
-export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> = {
-  meta: {
-    name: "listOrdinal",
-    description: "List an ordinal for sale on the global orderbook",
-    category: "ordinals",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ordinal: { type: "object", description: "WalletOutput from listOutputs" },
-        inputBEEF: { type: "array", description: "BEEF from listOutputs with include: 'entire transactions'" },
-        price: { type: "integer", description: "Price in satoshis" },
-        payAddress: { type: "string", description: "Address to receive payment on purchase" },
+export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> =
+  {
+    meta: {
+      name: "listOrdinal",
+      description: "List an ordinal for sale on the global orderbook",
+      category: "ordinals",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ordinal: {
+            type: "object",
+            description: "WalletOutput from listOutputs",
+          },
+          inputBEEF: {
+            type: "array",
+            description:
+              "BEEF from listOutputs with include: 'entire transactions'",
+          },
+          price: { type: "integer", description: "Price in satoshis" },
+          payAddress: {
+            type: "string",
+            description: "Address to receive payment on purchase",
+          },
+        },
+        required: ["ordinal", "inputBEEF", "price", "payAddress"],
       },
-      required: ["ordinal", "inputBEEF", "price", "payAddress"],
     },
-  },
-  async execute(ctx, input) {
-    try {
-      const params = await buildListOrdinal(ctx, input);
-      if ("error" in params) {
-        return params;
+    async execute(ctx, input) {
+      try {
+        const params = await buildListOrdinal(ctx, input);
+        if ("error" in params) {
+          return params;
+        }
+
+        const createResult = await ctx.wallet.createAction({
+          ...params,
+          options: { signAndProcess: false, randomizeOutputs: false },
+        });
+
+        if (!createResult.signableTransaction) {
+          return { error: "no-signable-transaction" };
+        }
+
+        if (!input.ordinal.customInstructions) {
+          return { error: "missing-custom-instructions" };
+        }
+        const { protocolID, keyID } = JSON.parse(
+          input.ordinal.customInstructions,
+        );
+
+        const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+        const unlocking = await signP2PKHInput(ctx, tx, 0, protocolID, keyID);
+        if (typeof unlocking !== "string") return unlocking;
+
+        const signResult = await ctx.wallet.signAction({
+          reference: createResult.signableTransaction.reference,
+          spends: { 0: { unlockingScript: unlocking } },
+          options: { acceptDelayedBroadcast: false },
+        });
+
+        if ("error" in signResult) {
+          return { error: String(signResult.error) };
+        }
+
+        return {
+          txid: signResult.txid,
+          rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
+        };
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : "unknown-error",
+        };
       }
-
-      const createResult = await ctx.wallet.createAction({
-        ...params,
-        options: { signAndProcess: false, randomizeOutputs: false },
-      });
-
-      if (!createResult.signableTransaction) {
-        return { error: "no-signable-transaction" };
-      }
-
-      if (!input.ordinal.customInstructions) {
-        return { error: "missing-custom-instructions" };
-      }
-      const { protocolID, keyID } = JSON.parse(input.ordinal.customInstructions);
-
-      const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
-      const unlocking = await signP2PKHInput(ctx, tx, 0, protocolID, keyID);
-      if (typeof unlocking !== "string") return unlocking;
-
-      const signResult = await ctx.wallet.signAction({
-        reference: createResult.signableTransaction.reference,
-        spends: { 0: { unlockingScript: unlocking } },
-        options: { acceptDelayedBroadcast: false },
-      });
-
-      if ("error" in signResult) {
-        return { error: String(signResult.error) };
-      }
-
-      return {
-        txid: signResult.txid,
-        rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
-      };
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
-    }
-  },
-};
+    },
+  };
 
 /** Input for cancelListing skill */
 export interface CancelListingInput {
@@ -640,16 +749,28 @@ export interface CancelListingInput {
 /**
  * Cancel an ordinal listing.
  */
-export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> = {
+export const cancelListing: Skill<
+  CancelListingInput,
+  OrdinalOperationResponse
+> = {
   meta: {
     name: "cancelListing",
-    description: "Cancel an ordinal listing and return the ordinal to the wallet",
+    description:
+      "Cancel an ordinal listing and return the ordinal to the wallet",
     category: "ordinals",
     inputSchema: {
       type: "object",
       properties: {
-        listing: { type: "object", description: "WalletOutput of the listing (must include lockingScript)" },
-        inputBEEF: { type: "array", description: "BEEF from listOutputs with include: 'entire transactions'" },
+        listing: {
+          type: "object",
+          description:
+            "WalletOutput of the listing (must include lockingScript)",
+        },
+        inputBEEF: {
+          type: "array",
+          description:
+            "BEEF from listOutputs with include: 'entire transactions'",
+        },
       },
       required: ["listing", "inputBEEF"],
     },
@@ -662,7 +783,11 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
       if (!listing.customInstructions) {
         return { error: "missing-custom-instructions" };
       }
-      const { protocolID, keyID, name: listingName } = JSON.parse(listing.customInstructions);
+      const {
+        protocolID,
+        keyID,
+        name: listingName,
+      } = JSON.parse(listing.customInstructions);
 
       const typeTag = listing.tags?.find((t) => t.startsWith("type:"));
       const originTag = listing.tags?.find((t) => t.startsWith("origin:"));
@@ -692,7 +817,11 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
             outputDescription: "Cancelled listing",
             basket: ORDINALS_BASKET,
             tags,
-            customInstructions: JSON.stringify({ protocolID, keyID, ...(listingName && { name: listingName }) }),
+            customInstructions: JSON.stringify({
+              protocolID,
+              keyID,
+              ...(listingName && { name: listingName }),
+            }),
           },
         ],
         options: { signAndProcess: false, randomizeOutputs: false },
@@ -708,12 +837,15 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
 
       const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
       const txInput = tx.inputs[0];
-      const lockingScript = txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]?.lockingScript;
+      const lockingScript =
+        txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]
+          ?.lockingScript;
       if (!lockingScript) {
         return { error: "missing-locking-script" };
       }
 
-      const sourceTXID = txInput.sourceTXID ?? txInput.sourceTransaction?.id("hex");
+      const sourceTXID =
+        txInput.sourceTXID ?? txInput.sourceTransaction?.id("hex");
       if (!sourceTXID) {
         return { error: "missing-source-txid" };
       }
@@ -772,7 +904,9 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };
@@ -780,7 +914,10 @@ export const cancelListing: Skill<CancelListingInput, OrdinalOperationResponse> 
 /**
  * Purchase an ordinal from the global orderbook.
  */
-export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResponse> = {
+export const purchaseOrdinal: Skill<
+  PurchaseOrdinalRequest,
+  OrdinalOperationResponse
+> = {
   meta: {
     name: "purchaseOrdinal",
     description: "Purchase an ordinal from the global orderbook",
@@ -789,11 +926,26 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
     inputSchema: {
       type: "object",
       properties: {
-        outpoint: { type: "string", description: "Outpoint of the listing to purchase" },
-        marketplaceAddress: { type: "string", description: "Marketplace address for fees" },
-        marketplaceRate: { type: "number", description: "Marketplace fee rate (0-1)" },
-        contentType: { type: "string", description: "Content type (auto-detected if not provided)" },
-        origin: { type: "string", description: "Origin outpoint (auto-detected if not provided)" },
+        outpoint: {
+          type: "string",
+          description: "Outpoint of the listing to purchase",
+        },
+        marketplaceAddress: {
+          type: "string",
+          description: "Marketplace address for fees",
+        },
+        marketplaceRate: {
+          type: "number",
+          description: "Marketplace fee rate (0-1)",
+        },
+        contentType: {
+          type: "string",
+          description: "Content type (auto-detected if not provided)",
+        },
+        origin: {
+          type: "string",
+          description: "Origin outpoint (auto-detected if not provided)",
+        },
       },
       required: ["outpoint"],
     },
@@ -821,9 +973,14 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         // Extract name from map.name or map.subTypeData.name
         if (name === undefined && metadata.map) {
           const mapName = metadata.map.name;
-          const subTypeData = metadata.map.subTypeData as Record<string, unknown> | undefined;
-          name = (typeof mapName === "string" ? mapName : undefined) ??
-                 (typeof subTypeData?.name === "string" ? subTypeData.name : undefined);
+          const subTypeData = metadata.map.subTypeData as
+            | Record<string, unknown>
+            | undefined;
+          name =
+            (typeof mapName === "string" ? mapName : undefined) ??
+            (typeof subTypeData?.name === "string"
+              ? subTypeData.name
+              : undefined);
         }
       }
 
@@ -950,7 +1107,9 @@ export const purchaseOrdinal: Skill<PurchaseOrdinalRequest, OrdinalOperationResp
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };

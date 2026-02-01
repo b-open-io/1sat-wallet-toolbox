@@ -4,7 +4,7 @@
  * Skills for broadcasting transactions.
  */
 
-import { Beef, Transaction, type InternalizeOutput } from "@bsv/sdk";
+import { Beef, type InternalizeOutput, Transaction } from "@bsv/sdk";
 import type { Skill } from "../skills/types";
 
 // ============================================================================
@@ -46,7 +46,10 @@ export const broadcast: Skill<BroadcastRequest, BroadcastResponse> = {
           description: "Transaction format (tx, beef, ef)",
           enum: ["tx", "beef", "ef"],
         },
-        description: { type: "string", description: "Description for wallet records" },
+        description: {
+          type: "string",
+          description: "Description for wallet records",
+        },
       },
       required: ["rawtx"],
     },
@@ -87,7 +90,9 @@ export const broadcast: Skill<BroadcastRequest, BroadcastResponse> = {
 
       return { txid };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "Unknown error" };
+      return {
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
   },
 };

@@ -58,7 +58,7 @@ export class Bsv21Indexer extends Indexer {
     const tokenData = decoded.tokenData;
 
     // Determine token ID - for deploy ops it's this outpoint, otherwise from inscription
-    const tokenId = tokenData.id || outpoint.toString();
+    const tokenId = tokenData.id || outpoint.toOrdinalString();
 
     // Determine initial status:
     // - deploy ops (deploy+mint, deploy+auth) are always valid (they create the token)

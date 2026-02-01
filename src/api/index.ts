@@ -52,17 +52,17 @@ export * from "./broadcast";
 // Export sweep module (uses external signing, not skill-based)
 export * from "./sweep";
 
-// Register all skills with the global registry
-import { skillRegistry } from "./skills/registry";
 import { balanceSkills } from "./balance";
-import { paymentsSkills } from "./payments";
-import { ordinalsSkills } from "./ordinals";
-import { tokensSkills } from "./tokens";
+import { broadcastSkills } from "./broadcast";
 import { inscriptionsSkills } from "./inscriptions";
 import { locksSkills } from "./locks";
+import { ordinalsSkills } from "./ordinals";
+import { paymentsSkills } from "./payments";
 import { signingSkills } from "./signing";
-import { broadcastSkills } from "./broadcast";
+// Register all skills with the global registry
+import { skillRegistry } from "./skills/registry";
 import { sweepSkills } from "./sweep";
+import { tokensSkills } from "./tokens";
 
 skillRegistry.registerAll([
   ...balanceSkills,

@@ -5,6 +5,7 @@
  */
 
 import {
+  type CreateActionOutput,
   Hash,
   PublicKey,
   Script,
@@ -12,10 +13,16 @@ import {
   TransactionSignature,
   Utils,
   type WalletOutput,
-  type CreateActionOutput,
 } from "@bsv/sdk";
-import type { Skill, OneSatContext } from "../skills/types";
-import { LOCK_BASKET, LOCK_PREFIX, LOCK_SUFFIX, MIN_UNLOCK_SATS, WOC_MAINNET_URL, WOC_TESTNET_URL } from "../constants";
+import {
+  LOCK_BASKET,
+  LOCK_PREFIX,
+  LOCK_SUFFIX,
+  MIN_UNLOCK_SATS,
+  WOC_MAINNET_URL,
+  WOC_TESTNET_URL,
+} from "../constants";
+import type { OneSatContext, Skill } from "../skills/types";
 
 // ============================================================================
 // Constants
@@ -93,7 +100,8 @@ export type GetLockDataInput = Record<string, never>;
 export const getLockData: Skill<GetLockDataInput, LockData> = {
   meta: {
     name: "getLockData",
-    description: "Get summary of time-locked BSV (total, unlockable, next unlock height)",
+    description:
+      "Get summary of time-locked BSV (total, unlockable, next unlock height)",
     category: "locks",
     inputSchema: {
       type: "object",
@@ -157,8 +165,14 @@ export const lockBsv: Skill<LockBsvInput, LockOperationResponse> = {
           items: {
             type: "object",
             properties: {
-              satoshis: { type: "integer", description: "Amount in satoshis to lock" },
-              until: { type: "integer", description: "Block height until which to lock" },
+              satoshis: {
+                type: "integer",
+                description: "Amount in satoshis to lock",
+              },
+              until: {
+                type: "integer",
+                description: "Block height until which to lock",
+              },
             },
             required: ["satoshis", "until"],
           },
@@ -210,9 +224,14 @@ export const lockBsv: Skill<LockBsvInput, LockOperationResponse> = {
       if (!result.txid) {
         return { error: "no-txid-returned" };
       }
-      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+      return {
+        txid: result.txid,
+        rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
+      };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };
@@ -279,7 +298,10 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
         return { error: "no-matured-locks" };
       }
 
-      const totalSats = maturedLocks.reduce((sum, l) => sum + l.output.satoshis, 0);
+      const totalSats = maturedLocks.reduce(
+        (sum, l) => sum + l.output.satoshis,
+        0,
+      );
       if (totalSats < MIN_UNLOCK_SATS * maturedLocks.length) {
         return { error: "insufficient-unlock-amount" };
       }
@@ -378,7 +400,9 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };

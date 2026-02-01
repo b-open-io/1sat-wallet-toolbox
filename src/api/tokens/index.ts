@@ -4,6 +4,7 @@
  * Skills for managing BSV21 tokens.
  */
 
+import { BSV21, OrdLock } from "@bopen-io/templates";
 import {
   BigNumber,
   LockingScript,
@@ -16,10 +17,9 @@ import {
   Utils,
   type WalletOutput,
 } from "@bsv/sdk";
-import { BSV21, OrdLock } from "@bopen-io/templates";
-import type { Skill, OneSatContext } from "../skills/types";
-import { BSV21_BASKET, BSV21_PROTOCOL, BSV21_FEE_SATS } from "../constants";
 import { deriveFundAddress } from "../../indexers";
+import { BSV21_BASKET, BSV21_FEE_SATS, BSV21_PROTOCOL } from "../constants";
+import type { OneSatContext, Skill } from "../skills/types";
 
 // ============================================================================
 // Types
@@ -107,13 +107,21 @@ async function buildPurchaseUnlockingScript(
   }
 
   const script = new UnlockingScript().writeBin(
-    buildSerializedOutput(tx.outputs[0].satoshis ?? 0, tx.outputs[0].lockingScript.toBinary()),
+    buildSerializedOutput(
+      tx.outputs[0].satoshis ?? 0,
+      tx.outputs[0].lockingScript.toBinary(),
+    ),
   );
 
   if (tx.outputs.length > 2) {
     const writer = new Utils.Writer();
     for (const output of tx.outputs.slice(2)) {
-      writer.write(buildSerializedOutput(output.satoshis ?? 0, output.lockingScript.toBinary()));
+      writer.write(
+        buildSerializedOutput(
+          output.satoshis ?? 0,
+          output.lockingScript.toBinary(),
+        ),
+      );
     }
     script.writeBin(writer.toArray());
   } else {
@@ -146,7 +154,10 @@ async function buildPurchaseUnlockingScript(
   return script.writeBin(preimage).writeOpCode(OP.OP_0);
 }
 
-async function listTokensInternal(ctx: OneSatContext, limit = 10000): Promise<WalletOutput[]> {
+async function listTokensInternal(
+  ctx: OneSatContext,
+  limit = 10000,
+): Promise<WalletOutput[]> {
   const result = await ctx.wallet.listOutputs({
     basket: BSV21_BASKET,
     includeTags: true,
@@ -176,7 +187,10 @@ export const listTokens: Skill<ListTokensInput, WalletOutput[]> = {
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", description: "Max number of tokens to return (default: 10000)" },
+        limit: {
+          type: "integer",
+          description: "Max number of tokens to return (default: 10000)",
+        },
       },
     },
   },
@@ -231,7 +245,10 @@ export const getBsv21Balances: Skill<GetBsv21BalancesInput, Bsv21Balance[]> = {
 
       const isConfirmed = status === "valid";
       const amt = BigInt(amtTag);
-      const dec = Number.parseInt(o.tags?.find((t) => t.startsWith("dec:"))?.slice(4) || "0", 10);
+      const dec = Number.parseInt(
+        o.tags?.find((t) => t.startsWith("dec:"))?.slice(4) || "0",
+        10,
+      );
       const symTag = o.tags?.find((t) => t.startsWith("sym:"))?.slice(4);
       const iconTag = o.tags?.find((t) => t.startsWith("icon:"))?.slice(5);
 
@@ -277,8 +294,14 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       type: "object",
       properties: {
         tokenId: { type: "string", description: "Token ID (txid_vout format)" },
-        amount: { type: "string", description: "Amount to send (as string for bigint)" },
-        counterparty: { type: "string", description: "Recipient identity public key (hex)" },
+        amount: {
+          type: "string",
+          description: "Amount to send (as string for bigint)",
+        },
+        counterparty: {
+          type: "string",
+          description: "Recipient identity public key (hex)",
+        },
         address: { type: "string", description: "Recipient P2PKH address" },
         paymail: { type: "string", description: "Recipient paymail address" },
       },
@@ -287,8 +310,15 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
   },
   async execute(ctx, input) {
     try {
-      const { tokenId, counterparty, address, paymail, amount: rawAmount } = input;
-      const amount = typeof rawAmount === "string" ? BigInt(rawAmount) : rawAmount;
+      const {
+        tokenId,
+        counterparty,
+        address,
+        paymail,
+        amount: rawAmount,
+      } = input;
+      const amount =
+        typeof rawAmount === "string" ? BigInt(rawAmount) : rawAmount;
 
       if (!counterparty && !address && !paymail) {
         return { error: "must-provide-counterparty-address-or-paymail" };
@@ -299,7 +329,11 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       }
 
       const parts = tokenId.split("_");
-      if (parts.length !== 2 || parts[0].length !== 64 || !/^\d+$/.test(parts[1])) {
+      if (
+        parts.length !== 2 ||
+        parts[0].length !== 64 ||
+        !/^\d+$/.test(parts[1])
+      ) {
         return { error: "invalid-token-id-format" };
       }
 
@@ -341,7 +375,10 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         if (ctx.services?.bsv21) {
           try {
             const [txid] = utxo.outpoint.split("_");
-            const validation = await ctx.services.bsv21.getTokenByTxid(tokenId, txid);
+            const validation = await ctx.services.bsv21.getTokenByTxid(
+              tokenId,
+              txid,
+            );
             const outputData = validation.outputs.find(
               (o) => `${validation.txid}_${o.vout}` === utxo.outpoint,
             );
@@ -385,7 +422,9 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
 
       const p2pkh = new P2PKH();
       const destinationLockingScript = p2pkh.lock(recipientAddress);
-      const transferScript = BSV21.transfer(tokenId, amount).lock(destinationLockingScript);
+      const transferScript = BSV21.transfer(tokenId, amount).lock(
+        destinationLockingScript,
+      );
       outputs.push({
         lockingScript: transferScript.toHex(),
         satoshis: 1,
@@ -412,7 +451,9 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         });
         const changeAddress = PublicKey.fromString(publicKey).toAddress();
         const changeLockingScript = p2pkh.lock(changeAddress);
-        const changeScript = BSV21.transfer(tokenId, change).lock(changeLockingScript);
+        const changeScript = BSV21.transfer(tokenId, change).lock(
+          changeLockingScript,
+        );
 
         outputs.push({
           lockingScript: changeScript.toHex(),
@@ -461,8 +502,12 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       // Submit to overlay service for indexing
       if (signResult.tx && ctx.services) {
         try {
-          const services = ctx.services as import("../../services/OneSatServices").OneSatServices;
-          const overlayResult = await services.overlay.submitBsv21(signResult.tx, tokenId);
+          const services =
+            ctx.services as import("../../services/OneSatServices").OneSatServices;
+          const overlayResult = await services.overlay.submitBsv21(
+            signResult.tx,
+            tokenId,
+          );
           console.log(`[sendBsv21] Overlay submission result:`, overlayResult);
         } catch (overlayError) {
           console.warn(`[sendBsv21] Overlay submission failed:`, overlayError);
@@ -474,7 +519,9 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };
@@ -482,7 +529,10 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
 /**
  * Purchase BSV21 tokens from marketplace.
  */
-export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> = {
+export const purchaseBsv21: Skill<
+  PurchaseBsv21Request,
+  TokenOperationResponse
+> = {
   meta: {
     name: "purchaseBsv21",
     description: "Purchase BSV21 tokens from the marketplace",
@@ -492,18 +542,37 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
       type: "object",
       properties: {
         tokenId: { type: "string", description: "Token ID (txid_vout format)" },
-        outpoint: { type: "string", description: "Outpoint of the listed token UTXO" },
-        amount: { type: "string", description: "Amount of tokens in the listing (as string)" },
-        marketplaceAddress: { type: "string", description: "Marketplace fee address" },
-        marketplaceRate: { type: "number", description: "Marketplace fee rate (0-1)" },
+        outpoint: {
+          type: "string",
+          description: "Outpoint of the listed token UTXO",
+        },
+        amount: {
+          type: "string",
+          description: "Amount of tokens in the listing (as string)",
+        },
+        marketplaceAddress: {
+          type: "string",
+          description: "Marketplace fee address",
+        },
+        marketplaceRate: {
+          type: "number",
+          description: "Marketplace fee rate (0-1)",
+        },
       },
       required: ["tokenId", "outpoint", "amount"],
     },
   },
   async execute(ctx, input) {
     try {
-      const { tokenId, outpoint, amount: rawAmount, marketplaceAddress, marketplaceRate } = input;
-      const tokenAmount = typeof rawAmount === "string" ? BigInt(rawAmount) : rawAmount;
+      const {
+        tokenId,
+        outpoint,
+        amount: rawAmount,
+        marketplaceAddress,
+        marketplaceRate,
+      } = input;
+      const tokenAmount =
+        typeof rawAmount === "string" ? BigInt(rawAmount) : rawAmount;
 
       if (!ctx.services) {
         return { error: "services-required-for-purchase" };
@@ -558,7 +627,9 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
 
       const p2pkh = new P2PKH();
       const buyerLockingScript = p2pkh.lock(ourTokenAddress);
-      const transferScript = BSV21.transfer(tokenId, tokenAmount).lock(buyerLockingScript);
+      const transferScript = BSV21.transfer(tokenId, tokenAmount).lock(
+        buyerLockingScript,
+      );
       outputs.push({
         lockingScript: transferScript.toHex(),
         satoshis: 1,
@@ -642,11 +713,21 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
       // Submit to overlay service for indexing
       if (signResult.tx && ctx.services) {
         try {
-          const services = ctx.services as import("../../services/OneSatServices").OneSatServices;
-          const overlayResult = await services.overlay.submitBsv21(signResult.tx, tokenId);
-          console.log(`[purchaseBsv21] Overlay submission result:`, overlayResult);
+          const services =
+            ctx.services as import("../../services/OneSatServices").OneSatServices;
+          const overlayResult = await services.overlay.submitBsv21(
+            signResult.tx,
+            tokenId,
+          );
+          console.log(
+            `[purchaseBsv21] Overlay submission result:`,
+            overlayResult,
+          );
         } catch (overlayError) {
-          console.warn(`[purchaseBsv21] Overlay submission failed:`, overlayError);
+          console.warn(
+            `[purchaseBsv21] Overlay submission failed:`,
+            overlayError,
+          );
         }
       }
 
@@ -655,7 +736,9 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };
@@ -665,4 +748,9 @@ export const purchaseBsv21: Skill<PurchaseBsv21Request, TokenOperationResponse> 
 // ============================================================================
 
 /** All token skills for registry */
-export const tokensSkills = [listTokens, getBsv21Balances, sendBsv21, purchaseBsv21];
+export const tokensSkills = [
+  listTokens,
+  getBsv21Balances,
+  sendBsv21,
+  purchaseBsv21,
+];

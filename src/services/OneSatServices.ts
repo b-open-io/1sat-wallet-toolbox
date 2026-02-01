@@ -1,5 +1,5 @@
 import { Beef, Hash, MerklePath, Transaction, Utils } from "@bsv/sdk";
-import { type TableOutput, type sdk as toolboxSdk } from "@bsv/wallet-toolbox";
+import type { TableOutput, sdk as toolboxSdk } from "@bsv/wallet-toolbox";
 
 type Chain = toolboxSdk.Chain;
 type BlockHeader = toolboxSdk.BlockHeader;
@@ -169,14 +169,20 @@ export class OneSatServices implements WalletServices {
     try {
       const proofBytes = await this.beef.getProof(txid);
       const merklePath = MerklePath.fromBinary([...proofBytes]);
-      console.log("[OneSatServices] getMerklePath got proof, blockHeight:", merklePath.blockHeight);
+      console.log(
+        "[OneSatServices] getMerklePath got proof, blockHeight:",
+        merklePath.blockHeight,
+      );
 
       // Fetch the block header for this merkle path
       const header = await this.chaintracks.findHeaderForHeight(
         merklePath.blockHeight,
       );
       if (!header) {
-        console.log("[OneSatServices] getMerklePath header not found for height:", merklePath.blockHeight);
+        console.log(
+          "[OneSatServices] getMerklePath header not found for height:",
+          merklePath.blockHeight,
+        );
         return {
           name: "1sat-api",
           error: new ServiceError(
@@ -186,7 +192,9 @@ export class OneSatServices implements WalletServices {
         };
       }
 
-      console.log("[OneSatServices] getMerklePath success, returning merklePath and header");
+      console.log(
+        "[OneSatServices] getMerklePath success, returning merklePath and header",
+      );
       return { name: "1sat-api", merklePath, header };
     } catch (error) {
       console.error("[OneSatServices] getMerklePath error:", error);
@@ -421,7 +429,7 @@ export class OneSatServices implements WalletServices {
 
       const isUtxo = !txo.spend;
       const [txid, voutStr] = txo.outpoint.split("_");
-      const vout = parseInt(voutStr, 10);
+      const vout = Number.parseInt(voutStr, 10);
 
       return {
         name: "1sat-api",

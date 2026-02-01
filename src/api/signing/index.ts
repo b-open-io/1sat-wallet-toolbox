@@ -4,9 +4,9 @@
  * Skills for message signing.
  */
 
-import { BigNumber, BSM, PublicKey, Signature, Utils } from "@bsv/sdk";
-import type { Skill } from "../skills/types";
+import { BSM, BigNumber, PublicKey, Signature, Utils } from "@bsv/sdk";
 import { MESSAGE_SIGNING_PROTOCOL } from "../constants";
+import type { Skill } from "../skills/types";
 
 // ============================================================================
 // Types
@@ -94,7 +94,10 @@ export const signMessage: Skill<SignMessageRequest, SignMessageResponse> = {
 
       const publicKey = PublicKey.fromString(pubKeyResult.publicKey);
       const signature = Signature.fromDER(result.signature);
-      const recovery = signature.CalculateRecoveryFactor(publicKey, new BigNumber(msgHash));
+      const recovery = signature.CalculateRecoveryFactor(
+        publicKey,
+        new BigNumber(msgHash),
+      );
 
       return {
         address: publicKey.toAddress(),
@@ -104,7 +107,9 @@ export const signMessage: Skill<SignMessageRequest, SignMessageResponse> = {
         derivationTag: tag,
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };

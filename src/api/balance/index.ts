@@ -4,8 +4,13 @@
  * Skills for querying wallet balance and payment UTXOs.
  */
 
-import type { Skill, OneSatContext } from "../skills/types";
-import { FUNDING_BASKET, WOC_MAINNET_URL, WOC_TESTNET_URL, EXCHANGE_RATE_CACHE_TTL } from "../constants";
+import {
+  EXCHANGE_RATE_CACHE_TTL,
+  FUNDING_BASKET,
+  WOC_MAINNET_URL,
+  WOC_TESTNET_URL,
+} from "../constants";
+import type { OneSatContext, Skill } from "../skills/types";
 
 // ============================================================================
 // Types
@@ -34,8 +39,14 @@ let exchangeRateCache: { rate: number; timestamp: number } | null = null;
 // Internal helpers
 // ============================================================================
 
-async function fetchExchangeRate(chain: "main" | "test", wocApiKey?: string): Promise<number> {
-  if (exchangeRateCache && Date.now() - exchangeRateCache.timestamp < EXCHANGE_RATE_CACHE_TTL) {
+async function fetchExchangeRate(
+  chain: "main" | "test",
+  wocApiKey?: string,
+): Promise<number> {
+  if (
+    exchangeRateCache &&
+    Date.now() - exchangeRateCache.timestamp < EXCHANGE_RATE_CACHE_TTL
+  ) {
     return exchangeRateCache.rate;
   }
 
@@ -45,7 +56,8 @@ async function fetchExchangeRate(chain: "main" | "test", wocApiKey?: string): Pr
 
   try {
     const response = await fetch(`${baseUrl}/exchangerate`, { headers });
-    if (!response.ok) throw new Error(`Failed to fetch: ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Failed to fetch: ${response.statusText}`);
 
     const data = await response.json();
     const rate = Number(data.rate.toFixed(2));
@@ -78,7 +90,10 @@ export const getBalance: Skill<GetBalanceInput, Balance> = {
   },
   async execute(ctx) {
     const exchangeRate = await fetchExchangeRate(ctx.chain, ctx.wocApiKey);
-    const result = await ctx.wallet.listOutputs({ basket: FUNDING_BASKET, limit: 10000 });
+    const result = await ctx.wallet.listOutputs({
+      basket: FUNDING_BASKET,
+      limit: 10000,
+    });
     const satoshis = result.outputs.reduce((sum, o) => sum + o.satoshis, 0);
     const bsv = satoshis / 100_000_000;
     const usdInCents = Math.round(bsv * exchangeRate * 100);
@@ -182,4 +197,9 @@ export const getChainInfo: Skill<GetChainInfoInput, ChainInfo | null> = {
 // ============================================================================
 
 /** All balance skills for registry */
-export const balanceSkills = [getBalance, getPaymentUtxos, getExchangeRate, getChainInfo];
+export const balanceSkills = [
+  getBalance,
+  getPaymentUtxos,
+  getExchangeRate,
+  getChainInfo,
+];

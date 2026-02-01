@@ -9,21 +9,25 @@
  * in Chrome extension service workers due to their ephemeral nature.
  */
 
-import type { WalletInterface, InternalizeOutput, InternalizeActionArgs } from "@bsv/sdk";
+import type {
+  InternalizeActionArgs,
+  InternalizeOutput,
+  WalletInterface,
+} from "@bsv/sdk";
 import { Beef } from "@bsv/sdk";
-import type { OneSatServices } from "../services/OneSatServices";
-import type { SyncOutput } from "../services/types";
-import type { SyncQueueStorage, SyncQueueItem } from "./types";
-import { AddressManager, type AddressDerivation } from "./AddressManager";
-import { Indexer, type ParseContext, type Txo } from "../indexers/types";
-import { Outpoint } from "../indexers/Outpoint";
+import { Bsv21Indexer } from "../indexers/Bsv21Indexer";
 import { FundIndexer } from "../indexers/FundIndexer";
 import { InscriptionIndexer } from "../indexers/InscriptionIndexer";
-import { Bsv21Indexer } from "../indexers/Bsv21Indexer";
-import { OriginIndexer } from "../indexers/OriginIndexer";
-import { OpNSIndexer } from "../indexers/OpNSIndexer";
-import { SigmaIndexer } from "../indexers/SigmaIndexer";
 import { MapIndexer } from "../indexers/MapIndexer";
+import { OpNSIndexer } from "../indexers/OpNSIndexer";
+import { OriginIndexer } from "../indexers/OriginIndexer";
+import { Outpoint } from "../indexers/Outpoint";
+import { SigmaIndexer } from "../indexers/SigmaIndexer";
+import type { Indexer, ParseContext, Txo } from "../indexers/types";
+import type { OneSatServices } from "../services/OneSatServices";
+import type { SyncOutput } from "../services/types";
+import type { AddressDerivation, AddressManager } from "./AddressManager";
+import type { SyncQueueItem, SyncQueueStorage } from "./types";
 
 /** Reorg-safe depth - only update lastQueuedScore for outputs this many blocks deep */
 const REORG_SAFE_DEPTH = 6;
@@ -49,7 +53,9 @@ export interface SyncFetcherEvents {
   "fetch:error": { message: string };
 }
 
-type SyncFetcherEventListener<K extends keyof SyncFetcherEvents> = (data: SyncFetcherEvents[K]) => void;
+type SyncFetcherEventListener<K extends keyof SyncFetcherEvents> = (
+  data: SyncFetcherEvents[K],
+) => void;
 
 /**
  * SyncFetcher - Fetches outputs via SSE and enqueues them.
@@ -62,7 +68,10 @@ export class SyncFetcher {
   private syncQueue: SyncQueueStorage;
   private addressManager: AddressManager;
   private unsubscribeStream: (() => void) | null = null;
-  private listeners: Map<keyof SyncFetcherEvents, Set<SyncFetcherEventListener<keyof SyncFetcherEvents>>> = new Map();
+  private listeners: Map<
+    keyof SyncFetcherEvents,
+    Set<SyncFetcherEventListener<keyof SyncFetcherEvents>>
+  > = new Map();
 
   constructor(options: SyncFetcherOptions) {
     this.services = options.services;
@@ -70,18 +79,31 @@ export class SyncFetcher {
     this.addressManager = options.addressManager;
   }
 
-  on<K extends keyof SyncFetcherEvents>(event: K, listener: SyncFetcherEventListener<K>): void {
+  on<K extends keyof SyncFetcherEvents>(
+    event: K,
+    listener: SyncFetcherEventListener<K>,
+  ): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(listener as SyncFetcherEventListener<keyof SyncFetcherEvents>);
+    this.listeners
+      .get(event)!
+      .add(listener as SyncFetcherEventListener<keyof SyncFetcherEvents>);
   }
 
-  off<K extends keyof SyncFetcherEvents>(event: K, listener: SyncFetcherEventListener<K>): void {
-    this.listeners.get(event)?.delete(listener as SyncFetcherEventListener<keyof SyncFetcherEvents>);
+  off<K extends keyof SyncFetcherEvents>(
+    event: K,
+    listener: SyncFetcherEventListener<K>,
+  ): void {
+    this.listeners
+      .get(event)
+      ?.delete(listener as SyncFetcherEventListener<keyof SyncFetcherEvents>);
   }
 
-  private emit<K extends keyof SyncFetcherEvents>(event: K, data: SyncFetcherEvents[K]): void {
+  private emit<K extends keyof SyncFetcherEvents>(
+    event: K,
+    data: SyncFetcherEvents[K],
+  ): void {
     this.listeners.get(event)?.forEach((listener) => listener(data));
   }
 
@@ -115,7 +137,10 @@ export class SyncFetcher {
         async (output: SyncOutput) => {
           await this.handleSyncOutput(output, currentHeight);
           queuedCount++;
-          this.emit("fetch:queued", { outpoint: output.outpoint, score: output.score });
+          this.emit("fetch:queued", {
+            outpoint: output.outpoint,
+            score: output.score,
+          });
         },
         fromScore,
         () => {
@@ -128,7 +153,7 @@ export class SyncFetcher {
           this.unsubscribeStream = null;
           this.emit("fetch:error", { message: error.message });
           reject(error);
-        }
+        },
       );
     });
   }
@@ -143,7 +168,10 @@ export class SyncFetcher {
     }
   }
 
-  private async handleSyncOutput(output: SyncOutput, currentHeight: number): Promise<void> {
+  private async handleSyncOutput(
+    output: SyncOutput,
+    currentHeight: number,
+  ): Promise<void> {
     // Enqueue the output
     await this.syncQueue.enqueue([
       {
@@ -188,7 +216,9 @@ export interface SyncProcessorEvents {
   "process:parsed": { internalizedCount: number };
 }
 
-type SyncProcessorEventListener<K extends keyof SyncProcessorEvents> = (data: SyncProcessorEvents[K]) => void;
+type SyncProcessorEventListener<K extends keyof SyncProcessorEvents> = (
+  data: SyncProcessorEvents[K],
+) => void;
 
 /**
  * SyncProcessor - Processes the sync queue and internalizes outputs.
@@ -207,7 +237,10 @@ export class SyncProcessor {
 
   private processorRunning = false;
   private stopRequested = false;
-  private listeners: Map<keyof SyncProcessorEvents, Set<SyncProcessorEventListener<keyof SyncProcessorEvents>>> = new Map();
+  private listeners: Map<
+    keyof SyncProcessorEvents,
+    Set<SyncProcessorEventListener<keyof SyncProcessorEvents>>
+  > = new Map();
 
   constructor(options: SyncProcessorOptions) {
     this.wallet = options.wallet;
@@ -232,18 +265,33 @@ export class SyncProcessor {
     ];
   }
 
-  on<K extends keyof SyncProcessorEvents>(event: K, listener: SyncProcessorEventListener<K>): void {
+  on<K extends keyof SyncProcessorEvents>(
+    event: K,
+    listener: SyncProcessorEventListener<K>,
+  ): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(listener as SyncProcessorEventListener<keyof SyncProcessorEvents>);
+    this.listeners
+      .get(event)!
+      .add(listener as SyncProcessorEventListener<keyof SyncProcessorEvents>);
   }
 
-  off<K extends keyof SyncProcessorEvents>(event: K, listener: SyncProcessorEventListener<K>): void {
-    this.listeners.get(event)?.delete(listener as SyncProcessorEventListener<keyof SyncProcessorEvents>);
+  off<K extends keyof SyncProcessorEvents>(
+    event: K,
+    listener: SyncProcessorEventListener<K>,
+  ): void {
+    this.listeners
+      .get(event)
+      ?.delete(
+        listener as SyncProcessorEventListener<keyof SyncProcessorEvents>,
+      );
   }
 
-  private emit<K extends keyof SyncProcessorEvents>(event: K, data: SyncProcessorEvents[K]): void {
+  private emit<K extends keyof SyncProcessorEvents>(
+    event: K,
+    data: SyncProcessorEvents[K],
+  ): void {
     this.listeners.get(event)?.forEach((listener) => listener(data));
   }
 
@@ -297,8 +345,8 @@ export class SyncProcessor {
         // Process each txid in parallel
         await Promise.all(
           Array.from(byTxid.entries()).map(([txid, items]) =>
-            this.processTxid(txid, items)
-          )
+            this.processTxid(txid, items),
+          ),
         );
 
         // Emit progress
@@ -320,13 +368,16 @@ export class SyncProcessor {
     }
   }
 
-  private async processTxid(txid: string, items: SyncQueueItem[]): Promise<void> {
+  private async processTxid(
+    txid: string,
+    items: SyncQueueItem[],
+  ): Promise<void> {
     try {
       // Build spend map: vout → spendTxid
       const spendMap = new Map<number, string>();
       for (const item of items) {
         if (item.spendTxid) {
-          const vout = parseInt(item.outpoint.split("_")[1], 10);
+          const vout = Number.parseInt(item.outpoint.split("_")[1], 10);
           spendMap.set(vout, item.spendTxid);
         }
       }
@@ -367,10 +418,7 @@ export class SyncProcessor {
         if (!derivation) continue;
 
         // Build internalize output using protocol from indexer
-        const internalizeOutput = this.buildInternalizeOutput(
-          txo,
-          derivation
-        );
+        const internalizeOutput = this.buildInternalizeOutput(txo, derivation);
         if (internalizeOutput) {
           outputs.push(internalizeOutput);
           internalizedCount++;
@@ -390,7 +438,9 @@ export class SyncProcessor {
           outputs.map((o) => ({ vout: o.outputIndex, protocol: o.protocol })),
         );
         await this.wallet.internalizeAction(args);
-        console.log(`[SyncProcessor] Internalization complete for txid ${txid}`);
+        console.log(
+          `[SyncProcessor] Internalization complete for txid ${txid}`,
+        );
         this.emit("process:parsed", { internalizedCount });
       }
 
@@ -399,14 +449,19 @@ export class SyncProcessor {
     } catch (error) {
       // Fail all items for this txid
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[SyncProcessor] Failed to process txid ${txid}:`, errorMsg);
+      console.error(
+        `[SyncProcessor] Failed to process txid ${txid}:`,
+        errorMsg,
+      );
       for (const item of items) {
         await this.syncQueue.fail(item.id, errorMsg);
       }
     }
   }
 
-  private async parseTransaction(tx: import("@bsv/sdk").Transaction): Promise<ParseContext> {
+  private async parseTransaction(
+    tx: import("@bsv/sdk").Transaction,
+  ): Promise<ParseContext> {
     const txid = tx.id("hex");
 
     // Initialize parse context
@@ -468,7 +523,7 @@ export class SyncProcessor {
 
   private buildInternalizeOutput(
     txo: Txo,
-    derivation: AddressDerivation
+    derivation: AddressDerivation,
   ): InternalizeOutput | null {
     const vout = txo.outpoint.vout;
 
@@ -546,7 +601,9 @@ export interface SyncEvents {
   "sync:parsed": { internalizedCount: number };
 }
 
-type SyncEventListener<K extends keyof SyncEvents> = (data: SyncEvents[K]) => void;
+type SyncEventListener<K extends keyof SyncEvents> = (
+  data: SyncEvents[K],
+) => void;
 
 /**
  * SyncManager - Legacy class that combines SSE fetching and queue processing.
@@ -562,7 +619,10 @@ export class SyncManager {
   private processor: SyncProcessor;
   private wallet: WalletInterface;
   private addressManager: AddressManager;
-  private listeners: Map<keyof SyncEvents, Set<SyncEventListener<keyof SyncEvents>>> = new Map();
+  private listeners: Map<
+    keyof SyncEvents,
+    Set<SyncEventListener<keyof SyncEvents>>
+  > = new Map();
   private fetchPromise: Promise<number> | null = null;
 
   constructor(options: SyncManagerOptions) {
@@ -617,18 +677,31 @@ export class SyncManager {
 
   // ===== Event Emitter =====
 
-  on<K extends keyof SyncEvents>(event: K, listener: SyncEventListener<K>): void {
+  on<K extends keyof SyncEvents>(
+    event: K,
+    listener: SyncEventListener<K>,
+  ): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(listener as SyncEventListener<keyof SyncEvents>);
+    this.listeners
+      .get(event)!
+      .add(listener as SyncEventListener<keyof SyncEvents>);
   }
 
-  off<K extends keyof SyncEvents>(event: K, listener: SyncEventListener<K>): void {
-    this.listeners.get(event)?.delete(listener as SyncEventListener<keyof SyncEvents>);
+  off<K extends keyof SyncEvents>(
+    event: K,
+    listener: SyncEventListener<K>,
+  ): void {
+    this.listeners
+      .get(event)
+      ?.delete(listener as SyncEventListener<keyof SyncEvents>);
   }
 
-  private emit<K extends keyof SyncEvents>(event: K, data: SyncEvents[K]): void {
+  private emit<K extends keyof SyncEvents>(
+    event: K,
+    data: SyncEvents[K],
+  ): void {
     this.listeners.get(event)?.forEach((listener) => listener(data));
   }
 

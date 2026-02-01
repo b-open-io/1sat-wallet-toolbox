@@ -20,6 +20,13 @@ export class Outpoint {
       this.vout = reader.readInt32LE();
     } else if (typeof txidOrOutpoint === "string") {
       this.txid = txidOrOutpoint.substring(0, 64);
+      // Support both separators: period (SDK canonical) or underscore (1sat legacy)
+      const separator = txidOrOutpoint[64];
+      if (separator !== "." && separator !== "_") {
+        throw new Error(
+          `Invalid outpoint separator: expected '.' or '_', got '${separator}'`,
+        );
+      }
       this.vout = Number.parseInt(txidOrOutpoint.substring(65), 10);
     } else if (typeof txidOrOutpoint === "object") {
       this.txid = txidOrOutpoint.txid;
@@ -30,6 +37,10 @@ export class Outpoint {
   }
 
   toString(): string {
+    return `${this.txid}.${this.vout}`;
+  }
+
+  toOrdinalString(): string {
     return `${this.txid}_${this.vout}`;
   }
 

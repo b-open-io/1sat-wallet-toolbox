@@ -18,7 +18,7 @@
 import { P2PKH, type WalletProtocol } from "@bsv/sdk";
 
 /** Fixed prefix for yours receive addresses */
-export const YOURS_PREFIX = 'yours';
+export const YOURS_PREFIX = "yours";
 
 /** BRC-29 protocol ID - used by wallet-toolbox for key derivation and signing */
 export const BRC29_PROTOCOL_ID: WalletProtocol = [2, "3241645161d8"];
@@ -48,7 +48,7 @@ export interface AddressDerivation {
  */
 export class AddressManager {
   private addressMap: Map<string, AddressDerivation> = new Map();
-  private maxKeyIndex: number = -1;
+  private maxKeyIndex = -1;
 
   /**
    * @param derivations - Pre-derived address derivations

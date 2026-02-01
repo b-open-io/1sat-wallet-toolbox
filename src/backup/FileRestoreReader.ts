@@ -1,7 +1,7 @@
-import { decode } from "@msgpack/msgpack";
-import type { Unzipped } from "fflate";
 import type { sdk } from "@bsv/wallet-toolbox-mobile/out/src/index.client.js";
 import type { TableSettings } from "@bsv/wallet-toolbox-mobile/out/src/storage/schema/tables/TableSettings.js";
+import { decode } from "@msgpack/msgpack";
+import type { Unzipped } from "fflate";
 import type { BackupManifest } from "./types";
 
 type RequestSyncChunkArgs = sdk.RequestSyncChunkArgs;

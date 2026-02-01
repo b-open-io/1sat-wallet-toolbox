@@ -59,7 +59,10 @@ export class InscriptionIndexer extends Indexer {
       // Try to find owner in suffix (after OP_ENDIF)
       owner = parseAddress(decoded.scriptSuffix, 0, this.network);
       // Also check for OP_CODESEPARATOR pattern
-      if (!owner && decoded.scriptSuffix.chunks[0]?.op === OP.OP_CODESEPARATOR) {
+      if (
+        !owner &&
+        decoded.scriptSuffix.chunks[0]?.op === OP.OP_CODESEPARATOR
+      ) {
         owner = parseAddress(decoded.scriptSuffix, 1, this.network);
       }
     }

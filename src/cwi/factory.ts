@@ -2,15 +2,15 @@
  * CWI Factory - Creates WalletInterface implementations with pluggable transport
  */
 
-import type { WalletInterface } from '@bsv/sdk';
-import { CWIEventName } from './types.js';
+import type { WalletInterface } from "@bsv/sdk";
+import { CWIEventName } from "./types.js";
 
 /**
  * Transport function signature - sends a message and returns response
  */
 export type CWITransport = <TResult>(
   action: CWIEventName,
-  params: unknown
+  params: unknown,
 ) => Promise<TResult>;
 
 /**
@@ -31,8 +31,10 @@ export const createCWI = (transport: CWITransport): WalletInterface => ({
 
   // Key Operations
   getPublicKey: (args) => transport(CWIEventName.GET_PUBLIC_KEY, args),
-  revealCounterpartyKeyLinkage: (args) => transport(CWIEventName.REVEAL_COUNTERPARTY_KEY_LINKAGE, args),
-  revealSpecificKeyLinkage: (args) => transport(CWIEventName.REVEAL_SPECIFIC_KEY_LINKAGE, args),
+  revealCounterpartyKeyLinkage: (args) =>
+    transport(CWIEventName.REVEAL_COUNTERPARTY_KEY_LINKAGE, args),
+  revealSpecificKeyLinkage: (args) =>
+    transport(CWIEventName.REVEAL_SPECIFIC_KEY_LINKAGE, args),
 
   // Cryptographic Operations
   encrypt: (args) => transport(CWIEventName.ENCRYPT, args),
@@ -43,18 +45,24 @@ export const createCWI = (transport: CWITransport): WalletInterface => ({
   verifySignature: (args) => transport(CWIEventName.VERIFY_SIGNATURE, args),
 
   // Certificate Operations
-  acquireCertificate: (args) => transport(CWIEventName.ACQUIRE_CERTIFICATE, args),
+  acquireCertificate: (args) =>
+    transport(CWIEventName.ACQUIRE_CERTIFICATE, args),
   listCertificates: (args) => transport(CWIEventName.LIST_CERTIFICATES, args),
   proveCertificate: (args) => transport(CWIEventName.PROVE_CERTIFICATE, args),
-  relinquishCertificate: (args) => transport(CWIEventName.RELINQUISH_CERTIFICATE, args),
-  discoverByIdentityKey: (args) => transport(CWIEventName.DISCOVER_BY_IDENTITY_KEY, args),
-  discoverByAttributes: (args) => transport(CWIEventName.DISCOVER_BY_ATTRIBUTES, args),
+  relinquishCertificate: (args) =>
+    transport(CWIEventName.RELINQUISH_CERTIFICATE, args),
+  discoverByIdentityKey: (args) =>
+    transport(CWIEventName.DISCOVER_BY_IDENTITY_KEY, args),
+  discoverByAttributes: (args) =>
+    transport(CWIEventName.DISCOVER_BY_ATTRIBUTES, args),
 
   // Status & Info
   isAuthenticated: (args) => transport(CWIEventName.IS_AUTHENTICATED, args),
-  waitForAuthentication: (args) => transport(CWIEventName.WAIT_FOR_AUTHENTICATION, args),
+  waitForAuthentication: (args) =>
+    transport(CWIEventName.WAIT_FOR_AUTHENTICATION, args),
   getHeight: (args) => transport(CWIEventName.GET_HEIGHT, args),
-  getHeaderForHeight: (args) => transport(CWIEventName.GET_HEADER_FOR_HEIGHT, args),
+  getHeaderForHeight: (args) =>
+    transport(CWIEventName.GET_HEADER_FOR_HEIGHT, args),
   getNetwork: (args) => transport(CWIEventName.GET_NETWORK, args),
   getVersion: (args) => transport(CWIEventName.GET_VERSION, args),
 });

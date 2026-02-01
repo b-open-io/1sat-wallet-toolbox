@@ -27,8 +27,10 @@ export class MapIndexer extends Indexer {
     while (chunks.length) {
       if (Utils.toUTF8(chunks[0]?.data || []) === MAP_PREFIX) {
         const map = MapIndexer.parseMap(new Script(chunks), 1);
-        const name = (map?.name ?? (map?.subTypeData as Record<string, unknown>)?.name ?? 'Unknown') as string;
-        const tags = name ? [`name:${name}`] : []
+        const name = (map?.name ??
+          (map?.subTypeData as Record<string, unknown>)?.name ??
+          "Unknown") as string;
+        const tags = name ? [`name:${name}`] : [];
         return map ? { data: map, tags } : undefined;
       }
 

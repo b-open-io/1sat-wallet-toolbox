@@ -4,10 +4,14 @@
  * Skills for creating inscriptions.
  */
 
-import { P2PKH, PublicKey, Script, Utils } from "@bsv/sdk";
 import { Inscription } from "@bopen-io/templates";
+import { P2PKH, PublicKey, Script, Utils } from "@bsv/sdk";
+import {
+  MAX_INSCRIPTION_BYTES,
+  ONESAT_PROTOCOL,
+  ORDINALS_BASKET,
+} from "../constants";
 import type { Skill } from "../skills/types";
-import { MAX_INSCRIPTION_BYTES, ORDINALS_BASKET, ONESAT_PROTOCOL } from "../constants";
 
 // ============================================================================
 // Types
@@ -32,7 +36,11 @@ export interface InscribeResponse {
 // Internal helpers
 // ============================================================================
 
-function buildInscriptionScript(address: string, base64Content: string, contentType: string): Script {
+function buildInscriptionScript(
+  address: string,
+  base64Content: string,
+  contentType: string,
+): Script {
   const content = Utils.toArray(base64Content, "base64");
   const inscription = Inscription.create(new Uint8Array(content), contentType);
   const inscriptionScript = inscription.lock();
@@ -59,8 +67,14 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
     inputSchema: {
       type: "object",
       properties: {
-        base64Content: { type: "string", description: "Base64 encoded content" },
-        contentType: { type: "string", description: "Content type (MIME type)" },
+        base64Content: {
+          type: "string",
+          description: "Base64 encoded content",
+        },
+        contentType: {
+          type: "string",
+          description: "Content type (MIME type)",
+        },
         map: {
           type: "object",
           description: "Optional MAP metadata",
@@ -74,7 +88,9 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
     try {
       const decoded = Utils.toArray(input.base64Content, "base64");
       if (decoded.length > MAX_INSCRIPTION_BYTES) {
-        return { error: `Inscription data too large: ${decoded.length} bytes (max ${MAX_INSCRIPTION_BYTES})` };
+        return {
+          error: `Inscription data too large: ${decoded.length} bytes (max ${MAX_INSCRIPTION_BYTES})`,
+        };
       }
 
       const keyID = Date.now().toString();
@@ -86,7 +102,11 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
       });
       const address = PublicKey.fromString(publicKey).toAddress();
 
-      const lockingScript = buildInscriptionScript(address, input.base64Content, input.contentType);
+      const lockingScript = buildInscriptionScript(
+        address,
+        input.base64Content,
+        input.contentType,
+      );
 
       // Build tags - type is always included, name from MAP if provided
       const tags = [`type:${input.contentType}`];
@@ -116,9 +136,14 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
       if (!result.txid) {
         return { error: "no-txid-returned" };
       }
-      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+      return {
+        txid: result.txid,
+        rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
+      };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };

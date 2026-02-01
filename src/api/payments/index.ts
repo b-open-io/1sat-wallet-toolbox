@@ -4,10 +4,10 @@
  * Skills for sending BSV payments.
  */
 
-import { P2PKH, Script, Utils, type CreateActionOutput } from "@bsv/sdk";
 import { Inscription } from "@bopen-io/templates";
-import type { Skill } from "../skills/types";
+import { type CreateActionOutput, P2PKH, Script, Utils } from "@bsv/sdk";
 import { FUNDING_BASKET } from "../constants";
+import type { Skill } from "../skills/types";
 
 // ============================================================================
 // Types
@@ -46,7 +46,11 @@ function isPaymail(address: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address);
 }
 
-function buildInscriptionScript(address: string, base64Data: string, mimeType: string): Script {
+function buildInscriptionScript(
+  address: string,
+  base64Data: string,
+  mimeType: string,
+): Script {
   const content = Utils.toArray(base64Data, "base64");
   const inscription = Inscription.create(new Uint8Array(content), mimeType);
   const inscriptionScript = inscription.lock();
@@ -73,7 +77,8 @@ export interface SendBsvInput {
 export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
   meta: {
     name: "sendBsv",
-    description: "Send BSV to one or more destinations (addresses, scripts, or OP_RETURN)",
+    description:
+      "Send BSV to one or more destinations (addresses, scripts, or OP_RETURN)",
     category: "payments",
     inputSchema: {
       type: "object",
@@ -84,10 +89,19 @@ export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
           items: {
             type: "object",
             properties: {
-              address: { type: "string", description: "Destination P2PKH address" },
-              paymail: { type: "string", description: "Destination paymail address" },
+              address: {
+                type: "string",
+                description: "Destination P2PKH address",
+              },
+              paymail: {
+                type: "string",
+                description: "Destination paymail address",
+              },
               satoshis: { type: "integer", description: "Amount in satoshis" },
-              script: { type: "string", description: "Custom locking script (hex)" },
+              script: {
+                type: "string",
+                description: "Custom locking script (hex)",
+              },
               data: {
                 type: "array",
                 description: "OP_RETURN data elements",
@@ -116,13 +130,19 @@ export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
           lockingScript = Script.fromHex(req.script);
         } else if (req.address) {
           if (req.inscription) {
-            lockingScript = buildInscriptionScript(req.address, req.inscription.base64Data, req.inscription.mimeType);
+            lockingScript = buildInscriptionScript(
+              req.address,
+              req.inscription.base64Data,
+              req.inscription.mimeType,
+            );
           } else {
             lockingScript = new P2PKH().lock(req.address);
           }
         } else if (req.data && req.data.length > 0) {
           try {
-            lockingScript = Script.fromASM(`OP_0 OP_RETURN ${req.data.join(" ")}`);
+            lockingScript = Script.fromASM(
+              `OP_0 OP_RETURN ${req.data.join(" ")}`,
+            );
           } catch {
             return { error: "invalid-data" };
           }
@@ -149,9 +169,14 @@ export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
       if (!result.txid) {
         return { error: "no-txid-returned" };
       }
-      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+      return {
+        txid: result.txid,
+        rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
+      };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };
@@ -198,8 +223,13 @@ export const sendAllBsv: Skill<SendAllBsvInput, SendBsvResponse> = {
         return { error: "no-funds" };
       }
 
-      const totalSats = listResult.outputs.reduce((sum, o) => sum + o.satoshis, 0);
-      const estimatedFee = Math.ceil((listResult.outputs.length * 150 + 44) * 1);
+      const totalSats = listResult.outputs.reduce(
+        (sum, o) => sum + o.satoshis,
+        0,
+      );
+      const estimatedFee = Math.ceil(
+        (listResult.outputs.length * 150 + 44) * 1,
+      );
       const sendAmount = totalSats - estimatedFee;
 
       if (sendAmount <= 0) {
@@ -227,9 +257,14 @@ export const sendAllBsv: Skill<SendAllBsvInput, SendBsvResponse> = {
       if (!result.txid) {
         return { error: "no-txid-returned" };
       }
-      return { txid: result.txid, rawtx: result.tx ? Utils.toHex(result.tx) : undefined };
+      return {
+        txid: result.txid,
+        rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
+      };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : "unknown-error" };
+      return {
+        error: error instanceof Error ? error.message : "unknown-error",
+      };
     }
   },
 };

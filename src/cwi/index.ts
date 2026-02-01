@@ -6,7 +6,7 @@
  * - chrome.ts: For extension popup/options (uses chrome.runtime.sendMessage directly)
  */
 
-export { CWIEventName, type CWIResponseDetail } from './types.js';
-export { createCWI, type CWITransport } from './factory.js';
-export { createEventCWI, CWI as EventCWI } from './event.js';
-export { createChromeCWI, ChromeCWI } from './chrome.js';
+export { CWIEventName, type CWIResponseDetail } from "./types.js";
+export { createCWI, type CWITransport } from "./factory.js";
+export { createEventCWI, CWI as EventCWI } from "./event.js";
+export { createChromeCWI, ChromeCWI } from "./chrome.js";

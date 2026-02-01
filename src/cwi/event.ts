@@ -3,18 +3,21 @@
  * Uses CustomEvent pattern, forwarded by content script to service worker
  */
 
-import type { WalletInterface } from '@bsv/sdk';
-import { CWIEventName } from './types.js';
-import { createCWI, type CWITransport } from './factory.js';
+import type { WalletInterface } from "@bsv/sdk";
+import { type CWITransport, createCWI } from "./factory.js";
+import type { CWIEventName } from "./types.js";
 
 // Event name for requests (listened by content script)
-const YOURS_REQUEST = 'YoursRequest';
+const YOURS_REQUEST = "YoursRequest";
 
 /**
  * CustomEvent-based transport for browser page context.
  * Content script listens for these events and forwards to service worker.
  */
-const eventTransport: CWITransport = <TResult>(action: CWIEventName, params: unknown): Promise<TResult> => {
+const eventTransport: CWITransport = <TResult>(
+  action: CWIEventName,
+  params: unknown,
+): Promise<TResult> => {
   return new Promise<TResult>((resolve, reject) => {
     const messageId = `${action}-${Date.now()}-${Math.random()}`;
     const requestEvent = new CustomEvent(YOURS_REQUEST, {
@@ -22,12 +25,16 @@ const eventTransport: CWITransport = <TResult>(action: CWIEventName, params: unk
     });
 
     function onResponse(e: Event) {
-      const responseEvent = e as CustomEvent<{ success: boolean; data?: TResult; error?: string }>;
+      const responseEvent = e as CustomEvent<{
+        success: boolean;
+        data?: TResult;
+        error?: string;
+      }>;
       const { detail } = responseEvent;
       if (detail.success) {
         resolve(detail.data as TResult);
       } else {
-        reject(new Error(detail.error || 'Unknown error'));
+        reject(new Error(detail.error || "Unknown error"));
       }
     }
 

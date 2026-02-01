@@ -187,7 +187,10 @@ export class IndexedDbSyncQueue implements SyncQueueStorage {
     });
   }
 
-  private async markProcessing(items: SyncQueueItem[], now: number): Promise<void> {
+  private async markProcessing(
+    items: SyncQueueItem[],
+    now: number,
+  ): Promise<void> {
     if (items.length === 0) return;
 
     const db = await this.getDb();

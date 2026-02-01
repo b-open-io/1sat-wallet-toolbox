@@ -172,12 +172,19 @@ export class ChaintracksClient extends BaseClient implements ChainTracker {
    */
   async findChainTipHeader(): Promise<BlockHeader> {
     const now = Date.now();
-    if (this.cachedTip && now - this.cachedTipTime < ChaintracksClient.TIP_CACHE_TTL_MS) {
+    if (
+      this.cachedTip &&
+      now - this.cachedTipTime < ChaintracksClient.TIP_CACHE_TTL_MS
+    ) {
       return this.cachedTip;
     }
 
     const header = await this.request<BlockHeader>("/tip");
-    console.log("[ChaintracksClient] findChainTipHeader:", header.height, header.hash);
+    console.log(
+      "[ChaintracksClient] findChainTipHeader:",
+      header.height,
+      header.hash,
+    );
     this.cachedTip = header;
     this.cachedTipTime = now;
     return header;

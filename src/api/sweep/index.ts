@@ -4,27 +4,32 @@
  * Functions for sweeping assets from external wallets into a BRC-100 wallet.
  */
 
+import { BSV21 } from "@bopen-io/templates";
 import {
+  type CreateActionOutput,
   P2PKH,
   PrivateKey,
   PublicKey,
   Transaction,
   Utils,
-  type CreateActionOutput,
 } from "@bsv/sdk";
-import { BSV21 } from "@bopen-io/templates";
-import type { OneSatContext, Skill } from "../skills/types";
-import type { IndexedOutput } from "../../services/types";
-import { ONESAT_PROTOCOL, BSV21_PROTOCOL, BSV21_FEE_SATS, BSV21_BASKET } from "../constants";
 import { deriveFundAddress } from "../../indexers";
+import type { IndexedOutput } from "../../services/types";
+import {
+  BSV21_BASKET,
+  BSV21_FEE_SATS,
+  BSV21_PROTOCOL,
+  ONESAT_PROTOCOL,
+} from "../constants";
+import type { OneSatContext, Skill } from "../skills/types";
 import type {
+  SweepBsv21Request,
+  SweepBsv21Response,
   SweepBsvRequest,
   SweepBsvResponse,
   SweepInput,
   SweepOrdinalsRequest,
   SweepOrdinalsResponse,
-  SweepBsv21Request,
-  SweepBsv21Response,
 } from "./types";
 
 export * from "./types";
@@ -78,7 +83,6 @@ export async function prepareSweepInputs(
 
   return results;
 }
-
 
 /**
  * Sweep BSV from external inputs into the destination wallet.
@@ -157,9 +161,7 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
       }
 
       // Fetch BEEF for all input transactions and merge them
-      const txids = [
-        ...new Set(inputs.map((i) => i.outpoint.split("_")[0])),
-      ];
+      const txids = [...new Set(inputs.map((i) => i.outpoint.split("_")[0]))];
 
       console.log(`[sweep] Fetching BEEF for ${txids.length} transactions`);
 
@@ -170,7 +172,9 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
         firstBeef.mergeBeef(additionalBeef);
       }
 
-      console.log(`[sweep] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`);
+      console.log(
+        `[sweep] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`,
+      );
 
       // Build input descriptors (we'll sign after getting the final transaction)
       const inputDescriptors = inputs.map((input) => {
@@ -224,14 +228,16 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
       // Step 2: Sign each input with our external key
       const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
 
-      console.log(`[sweep] Transaction has ${tx.inputs.length} inputs, ${tx.outputs.length} outputs`);
+      console.log(
+        `[sweep] Transaction has ${tx.inputs.length} inputs, ${tx.outputs.length} outputs`,
+      );
 
       // Build a set of outpoints we control (using SDK format with ".")
       const ourOutpoints = new Set(
         inputs.map((input) => {
           const [txid, vout] = input.outpoint.split("_");
           return `${txid}.${vout}`;
-        })
+        }),
       );
 
       // Find and set up P2PKH unlocker on each input we control
@@ -239,9 +245,13 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
         const txInput = tx.inputs[i];
         const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
         const hasSourceTx = !!txInput.sourceTransaction;
-        const sourceSatoshis = txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]?.satoshis;
+        const sourceSatoshis =
+          txInput.sourceTransaction?.outputs[txInput.sourceOutputIndex]
+            ?.satoshis;
 
-        console.log(`[sweep] Input ${i}: ${inputOutpoint}, hasSourceTx=${hasSourceTx}, satoshis=${sourceSatoshis}, isOurs=${ourOutpoints.has(inputOutpoint)}`);
+        console.log(
+          `[sweep] Input ${i}: ${inputOutpoint}, hasSourceTx=${hasSourceTx}, satoshis=${sourceSatoshis}, isOurs=${ourOutpoints.has(inputOutpoint)}`,
+        );
 
         if (ourOutpoints.has(inputOutpoint)) {
           const p2pkh = new P2PKH();
@@ -263,7 +273,9 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
         const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
 
         if (ourOutpoints.has(inputOutpoint)) {
-          spends[i] = { unlockingScript: txInput.unlockingScript?.toHex() ?? "" };
+          spends[i] = {
+            unlockingScript: txInput.unlockingScript?.toHex() ?? "",
+          };
         }
       }
 
@@ -296,301 +308,383 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
  * Each input is expected to be a 1-sat ordinal output. Each ordinal is
  * transferred to a derived address using the wallet's key derivation.
  */
-export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> = {
-  meta: {
-    name: "sweepOrdinals",
-    description:
-      "Sweep ordinals from external wallet (via WIF) into the connected wallet",
-    category: "sweep",
-    requiresServices: true,
-    inputSchema: {
-      type: "object",
-      properties: {
-        inputs: {
-          type: "array",
-          description: "Ordinal UTXOs to sweep",
-          items: {
-            type: "object",
-            properties: {
-              outpoint: { type: "string", description: "Outpoint (txid_vout)" },
-              satoshis: { type: "integer", description: "Satoshis (should be 1)" },
-              lockingScript: { type: "string", description: "Locking script hex" },
-              contentType: { type: "string", description: "Content type from metadata" },
-              origin: { type: "string", description: "Origin outpoint" },
-              name: { type: "string", description: "Name from MAP metadata" },
+export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
+  {
+    meta: {
+      name: "sweepOrdinals",
+      description:
+        "Sweep ordinals from external wallet (via WIF) into the connected wallet",
+      category: "sweep",
+      requiresServices: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          inputs: {
+            type: "array",
+            description: "Ordinal UTXOs to sweep",
+            items: {
+              type: "object",
+              properties: {
+                outpoint: {
+                  type: "string",
+                  description: "Outpoint (txid_vout)",
+                },
+                satoshis: {
+                  type: "integer",
+                  description: "Satoshis (should be 1)",
+                },
+                lockingScript: {
+                  type: "string",
+                  description: "Locking script hex",
+                },
+                contentType: {
+                  type: "string",
+                  description: "Content type from metadata",
+                },
+                origin: { type: "string", description: "Origin outpoint" },
+                name: { type: "string", description: "Name from MAP metadata" },
+              },
+              required: ["outpoint", "satoshis", "lockingScript"],
             },
-            required: ["outpoint", "satoshis", "lockingScript"],
+          },
+          wif: {
+            type: "string",
+            description: "WIF private key controlling the inputs",
           },
         },
-        wif: {
-          type: "string",
-          description: "WIF private key controlling the inputs",
-        },
+        required: ["inputs", "wif"],
       },
-      required: ["inputs", "wif"],
     },
-  },
 
-  async execute(ctx, request): Promise<SweepOrdinalsResponse> {
-    if (!ctx.services) {
-      return { error: "services-required" };
-    }
-
-    try {
-      const { inputs, wif } = request;
-
-      if (!inputs || inputs.length === 0) {
-        return { error: "no-inputs" };
+    async execute(ctx, request): Promise<SweepOrdinalsResponse> {
+      if (!ctx.services) {
+        return { error: "services-required" };
       }
 
-      // Parse WIF
-      const privateKey = PrivateKey.fromWif(wif);
+      try {
+        const { inputs, wif } = request;
 
-      // Fetch BEEF for all input transactions and merge them
-      const txids = [...new Set(inputs.map((i) => i.outpoint.split("_")[0]))];
-      console.log(`[sweepOrdinals] Fetching BEEF for ${txids.length} transactions`);
-
-      const firstBeef = await ctx.services.getBeefForTxid(txids[0]);
-      for (let i = 1; i < txids.length; i++) {
-        const additionalBeef = await ctx.services.getBeefForTxid(txids[i]);
-        firstBeef.mergeBeef(additionalBeef);
-      }
-
-      console.log(`[sweepOrdinals] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`);
-
-      // Build input descriptors
-      const inputDescriptors = inputs.map((input) => {
-        const [txid, voutStr] = input.outpoint.split("_");
-        return {
-          outpoint: `${txid}.${voutStr}`,
-          inputDescription: `Ordinal ${input.origin ?? input.outpoint}`,
-          unlockingScriptLength: 108,
-          sequenceNumber: 0xffffffff,
-        };
-      });
-
-      // Build outputs - one per ordinal, each 1 sat to derived address
-      const outputs: CreateActionOutput[] = [];
-      for (const input of inputs) {
-        // Derive a unique public key for this ordinal using the input outpoint as keyID
-        const pubKeyResult = await ctx.wallet.getPublicKey({
-          protocolID: ONESAT_PROTOCOL,
-          keyID: input.outpoint,
-          forSelf: true,
-        });
-
-        if (!pubKeyResult.publicKey) {
-          return { error: `Failed to derive key for ${input.outpoint}` };
+        if (!inputs || inputs.length === 0) {
+          return { error: "no-inputs" };
         }
 
-        // Create P2PKH locking script from derived public key
-        const derivedAddress = PublicKey.fromString(pubKeyResult.publicKey).toAddress();
-        const lockingScript = new P2PKH().lock(derivedAddress);
+        // Parse WIF
+        const privateKey = PrivateKey.fromWif(wif);
 
-        // Build tags following ordinals API pattern
-        const tags: string[] = [];
-        if (input.contentType) tags.push(`type:${input.contentType}`);
-        if (input.origin) tags.push(`origin:${input.origin}`);
-        const customInstructions = JSON.stringify({
-          protocolID: ONESAT_PROTOCOL,
-          keyID: input.outpoint,
-          ...(input.name && { name: input.name.slice(0, 64) }),
+        // Fetch BEEF for all input transactions and merge them
+        const txids = [...new Set(inputs.map((i) => i.outpoint.split("_")[0]))];
+        console.log(
+          `[sweepOrdinals] Fetching BEEF for ${txids.length} transactions`,
+        );
+
+        const firstBeef = await ctx.services.getBeefForTxid(txids[0]);
+        for (let i = 1; i < txids.length; i++) {
+          const additionalBeef = await ctx.services.getBeefForTxid(txids[i]);
+          firstBeef.mergeBeef(additionalBeef);
+        }
+
+        console.log(
+          `[sweepOrdinals] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`,
+        );
+
+        // Build input descriptors
+        const inputDescriptors = inputs.map((input) => {
+          const [txid, voutStr] = input.outpoint.split("_");
+          return {
+            outpoint: `${txid}.${voutStr}`,
+            inputDescription: `Ordinal ${input.origin ?? input.outpoint}`,
+            unlockingScriptLength: 108,
+            sequenceNumber: 0xffffffff,
+          };
         });
-        console.log(`[sweepOrdinals] Output for ${input.outpoint}: keyID=${input.outpoint}, customInstructions=${customInstructions}`);
-        outputs.push({
-          lockingScript: lockingScript.toHex(),
-          satoshis: 1,
-          outputDescription: `Ordinal ${input.origin ?? input.outpoint}`,
-          basket: "1sat",
-          tags,
-          customInstructions,
-        });
-      }
 
-      const beefData = firstBeef.toBinary();
+        // Build outputs - one per ordinal, each 1 sat to derived address
+        const outputs: CreateActionOutput[] = [];
+        for (const input of inputs) {
+          // Derive a unique public key for this ordinal using the input outpoint as keyID
+          const pubKeyResult = await ctx.wallet.getPublicKey({
+            protocolID: ONESAT_PROTOCOL,
+            keyID: input.outpoint,
+            forSelf: true,
+          });
 
-      // Create action to get signable transaction
-      // CRITICAL: randomizeOutputs must be false to preserve ordinal satoshi positions
-      const createActionArgs = {
-        description: `Sweep ${inputs.length} ordinal${inputs.length !== 1 ? "s" : ""}`,
-        inputBEEF: beefData,
-        inputs: inputDescriptors,
-        outputs,
-        options: { signAndProcess: false, randomizeOutputs: false },
-      };
+          if (!pubKeyResult.publicKey) {
+            return { error: `Failed to derive key for ${input.outpoint}` };
+          }
 
-      console.log(`[sweepOrdinals] === CREATE ACTION ARGS ===`);
-      console.log(`[sweepOrdinals] description: ${createActionArgs.description}`);
-      console.log(`[sweepOrdinals] inputBEEF length: ${beefData.length} bytes`);
-      console.log(`[sweepOrdinals] inputs count: ${inputDescriptors.length}`);
-      console.log(`[sweepOrdinals] outputs count: ${outputs.length}`);
-      console.log(`[sweepOrdinals] inputs:`, JSON.stringify(inputDescriptors, null, 2));
-      console.log(`[sweepOrdinals] outputs:`, JSON.stringify(outputs, null, 2));
-      console.log(`[sweepOrdinals] options:`, JSON.stringify(createActionArgs.options));
-      console.log(`[sweepOrdinals] Calling createAction...`);
+          // Create P2PKH locking script from derived public key
+          const derivedAddress = PublicKey.fromString(
+            pubKeyResult.publicKey,
+          ).toAddress();
+          const lockingScript = new P2PKH().lock(derivedAddress);
 
-      let createResult;
-      try {
-        createResult = await ctx.wallet.createAction(createActionArgs);
-        console.log(`[sweepOrdinals] createAction returned:`, JSON.stringify(createResult, (key, value) => {
-          // Don't stringify large binary data
-          if (key === 'tx' && value instanceof Uint8Array) return `<Uint8Array ${value.length} bytes>`;
-          if (key === 'tx' && Array.isArray(value)) return `<Array ${value.length} bytes>`;
-          return value;
-        }, 2));
-      } catch (createError) {
-        console.error(`[sweepOrdinals] createAction threw:`, createError);
-        const errorMsg = createError instanceof Error ? createError.message : String(createError);
-        const errorStack = createError instanceof Error ? createError.stack : undefined;
-        console.error(`[sweepOrdinals] Stack:`, errorStack);
-        return { error: `createAction failed: ${errorMsg}` };
-      }
+          // Build tags following ordinals API pattern
+          const tags: string[] = [];
+          if (input.contentType) tags.push(`type:${input.contentType}`);
+          if (input.origin) tags.push(`origin:${input.origin}`);
+          const customInstructions = JSON.stringify({
+            protocolID: ONESAT_PROTOCOL,
+            keyID: input.outpoint,
+            ...(input.name && { name: input.name.slice(0, 64) }),
+          });
+          console.log(
+            `[sweepOrdinals] Output for ${input.outpoint}: keyID=${input.outpoint}, customInstructions=${customInstructions}`,
+          );
+          outputs.push({
+            lockingScript: lockingScript.toHex(),
+            satoshis: 1,
+            outputDescription: `Ordinal ${input.origin ?? input.outpoint}`,
+            basket: "1sat",
+            tags,
+            customInstructions,
+          });
+        }
 
-      if ("error" in createResult && createResult.error) {
-        return { error: String(createResult.error) };
-      }
+        const beefData = firstBeef.toBinary();
 
-      if (!createResult.signableTransaction) {
-        return { error: "no-signable-transaction" };
-      }
+        // Create action to get signable transaction
+        // CRITICAL: randomizeOutputs must be false to preserve ordinal satoshi positions
+        const createActionArgs = {
+          description: `Sweep ${inputs.length} ordinal${inputs.length !== 1 ? "s" : ""}`,
+          inputBEEF: beefData,
+          inputs: inputDescriptors,
+          outputs,
+          options: { signAndProcess: false, randomizeOutputs: false },
+        };
 
-      // Sign each input with our external key
-      const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+        console.log(`[sweepOrdinals] === CREATE ACTION ARGS ===`);
+        console.log(
+          `[sweepOrdinals] description: ${createActionArgs.description}`,
+        );
+        console.log(
+          `[sweepOrdinals] inputBEEF length: ${beefData.length} bytes`,
+        );
+        console.log(`[sweepOrdinals] inputs count: ${inputDescriptors.length}`);
+        console.log(`[sweepOrdinals] outputs count: ${outputs.length}`);
+        console.log(
+          `[sweepOrdinals] inputs:`,
+          JSON.stringify(inputDescriptors, null, 2),
+        );
+        console.log(
+          `[sweepOrdinals] outputs:`,
+          JSON.stringify(outputs, null, 2),
+        );
+        console.log(
+          `[sweepOrdinals] options:`,
+          JSON.stringify(createActionArgs.options),
+        );
+        console.log(`[sweepOrdinals] Calling createAction...`);
 
-      // Log transaction structure for debugging
-      console.log(`[sweepOrdinals] === Transaction Structure ===`);
-      console.log(`[sweepOrdinals] Inputs (${tx.inputs.length}):`);
-      let totalInputSats = 0;
-      for (let i = 0; i < tx.inputs.length; i++) {
-        const inp = tx.inputs[i];
-        const sats = inp.sourceTransaction?.outputs[inp.sourceOutputIndex]?.satoshis ?? 0;
-        totalInputSats += sats;
-        console.log(`  [${i}] ${inp.sourceTXID}:${inp.sourceOutputIndex} = ${sats} sats`);
-      }
-      console.log(`[sweepOrdinals] Outputs (${tx.outputs.length}):`);
-      let totalOutputSats = 0;
-      for (let i = 0; i < tx.outputs.length; i++) {
-        const out = tx.outputs[i];
-        totalOutputSats += out.satoshis ?? 0;
-        console.log(`  [${i}] ${out.satoshis} sats, script len=${out.lockingScript?.toHex().length ?? 0}`);
-      }
-      console.log(`[sweepOrdinals] Total in: ${totalInputSats}, Total out: ${totalOutputSats}, Fee: ${totalInputSats - totalOutputSats}`);
-      console.log(`[sweepOrdinals] Signable tx hex: ${Utils.toHex(createResult.signableTransaction.tx)}`);
-      console.log(`[sweepOrdinals] ==============================`);
+        let createResult;
+        try {
+          createResult = await ctx.wallet.createAction(createActionArgs);
+          console.log(
+            `[sweepOrdinals] createAction returned:`,
+            JSON.stringify(
+              createResult,
+              (key, value) => {
+                // Don't stringify large binary data
+                if (key === "tx" && value instanceof Uint8Array)
+                  return `<Uint8Array ${value.length} bytes>`;
+                if (key === "tx" && Array.isArray(value))
+                  return `<Array ${value.length} bytes>`;
+                return value;
+              },
+              2,
+            ),
+          );
+        } catch (createError) {
+          console.error(`[sweepOrdinals] createAction threw:`, createError);
+          const errorMsg =
+            createError instanceof Error
+              ? createError.message
+              : String(createError);
+          const errorStack =
+            createError instanceof Error ? createError.stack : undefined;
+          console.error(`[sweepOrdinals] Stack:`, errorStack);
+          return { error: `createAction failed: ${errorMsg}` };
+        }
 
-      // Build a set of outpoints we control
-      const ourOutpoints = new Set(
-        inputs.map((input) => {
-          const [txid, vout] = input.outpoint.split("_");
-          return `${txid}.${vout}`;
-        })
-      );
+        if ("error" in createResult && createResult.error) {
+          return { error: String(createResult.error) };
+        }
 
-      // Set up P2PKH unlocker on each input we control
-      for (let i = 0; i < tx.inputs.length; i++) {
-        const txInput = tx.inputs[i];
-        const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
+        if (!createResult.signableTransaction) {
+          return { error: "no-signable-transaction" };
+        }
 
-        if (ourOutpoints.has(inputOutpoint)) {
-          const p2pkh = new P2PKH();
-          txInput.unlockingScriptTemplate = p2pkh.unlock(
-            privateKey,
-            "all",
-            true, // anyoneCanPay
+        // Sign each input with our external key
+        const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
+
+        // Log transaction structure for debugging
+        console.log(`[sweepOrdinals] === Transaction Structure ===`);
+        console.log(`[sweepOrdinals] Inputs (${tx.inputs.length}):`);
+        let totalInputSats = 0;
+        for (let i = 0; i < tx.inputs.length; i++) {
+          const inp = tx.inputs[i];
+          const sats =
+            inp.sourceTransaction?.outputs[inp.sourceOutputIndex]?.satoshis ??
+            0;
+          totalInputSats += sats;
+          console.log(
+            `  [${i}] ${inp.sourceTXID}:${inp.sourceOutputIndex} = ${sats} sats`,
           );
         }
-      }
-
-      await tx.sign();
-
-      // Log signed transaction details for debugging
-      const localTxid = tx.id("hex");
-      console.log(`[sweepOrdinals] === LOCAL SIGNED TX ===`);
-      console.log(`[sweepOrdinals] Local txid: ${localTxid}`);
-      console.log(`[sweepOrdinals] Signed tx hex: ${tx.toHex()}`);
-
-      // Extract unlocking scripts for signAction
-      const spends: Record<number, { unlockingScript: string }> = {};
-      console.log(`[sweepOrdinals] === UNLOCKING SCRIPTS FOR SIGNACTION ===`);
-      for (let i = 0; i < tx.inputs.length; i++) {
-        const txInput = tx.inputs[i];
-        const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
-
-        if (ourOutpoints.has(inputOutpoint)) {
-          const unlockHex = txInput.unlockingScript?.toHex() ?? "";
-          spends[i] = { unlockingScript: unlockHex };
-          console.log(`  [${i}] ${inputOutpoint}: ${unlockHex.length} chars`);
-        } else {
-          console.log(`  [${i}] ${inputOutpoint}: (wallet input - not ours)`);
+        console.log(`[sweepOrdinals] Outputs (${tx.outputs.length}):`);
+        let totalOutputSats = 0;
+        for (let i = 0; i < tx.outputs.length; i++) {
+          const out = tx.outputs[i];
+          totalOutputSats += out.satoshis ?? 0;
+          console.log(
+            `  [${i}] ${out.satoshis} sats, script len=${out.lockingScript?.toHex().length ?? 0}`,
+          );
         }
-      }
+        console.log(
+          `[sweepOrdinals] Total in: ${totalInputSats}, Total out: ${totalOutputSats}, Fee: ${totalInputSats - totalOutputSats}`,
+        );
+        console.log(
+          `[sweepOrdinals] Signable tx hex: ${Utils.toHex(createResult.signableTransaction.tx)}`,
+        );
+        console.log(`[sweepOrdinals] ==============================`);
 
-      // Complete the action with our signatures
-      const signResult = await ctx.wallet.signAction({
-        reference: createResult.signableTransaction.reference,
-        spends,
-        options: { acceptDelayedBroadcast: false },
-      });
+        // Build a set of outpoints we control
+        const ourOutpoints = new Set(
+          inputs.map((input) => {
+            const [txid, vout] = input.outpoint.split("_");
+            return `${txid}.${vout}`;
+          }),
+        );
 
-      if ("error" in signResult) {
-        return { error: String(signResult.error) };
-      }
+        // Set up P2PKH unlocker on each input we control
+        for (let i = 0; i < tx.inputs.length; i++) {
+          const txInput = tx.inputs[i];
+          const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
 
-      // Debug: compare local vs signAction result
-      console.log(`[sweepOrdinals] === SIGN ACTION RESULT ===`);
-      console.log(`[sweepOrdinals] signAction txid: ${signResult.txid}`);
-      // Log broadcast results if available
-      if ("sendWithResults" in signResult) {
-        console.log(`[sweepOrdinals] sendWithResults:`, JSON.stringify((signResult as { sendWithResults?: unknown }).sendWithResults));
-      }
-      console.log(`[sweepOrdinals] Local txid (partial): ${localTxid}`);
-      console.log(`[sweepOrdinals] Note: TXIDs differ because local is partial (wallet input unsigned)`);
-
-      if (signResult.tx) {
-        // Parse returned BEEF to show final transaction structure
-        const returnedTx = Transaction.fromBEEF(signResult.tx);
-        console.log(`[sweepOrdinals] === FINAL TX STRUCTURE (broadcast) ===`);
-        console.log(`[sweepOrdinals] Final inputs (${returnedTx.inputs.length}):`);
-        let returnedInputSats = 0;
-        for (let i = 0; i < returnedTx.inputs.length; i++) {
-          const inp = returnedTx.inputs[i];
-          const sats = inp.sourceTransaction?.outputs[inp.sourceOutputIndex]?.satoshis ?? 0;
-          returnedInputSats += sats;
-          const isOurs = ourOutpoints.has(`${inp.sourceTXID}.${inp.sourceOutputIndex}`);
-          console.log(`  [${i}] ${inp.sourceTXID?.slice(0,8)}...:${inp.sourceOutputIndex} = ${sats} sats, unlock=${inp.unlockingScript?.toHex().length ?? 0} chars ${isOurs ? "(ours)" : "(wallet fee)"}`);
+          if (ourOutpoints.has(inputOutpoint)) {
+            const p2pkh = new P2PKH();
+            txInput.unlockingScriptTemplate = p2pkh.unlock(
+              privateKey,
+              "all",
+              true, // anyoneCanPay
+            );
+          }
         }
-        console.log(`[sweepOrdinals] Final outputs (${returnedTx.outputs.length}):`);
-        let returnedOutputSats = 0;
-        for (let i = 0; i < returnedTx.outputs.length; i++) {
-          const out = returnedTx.outputs[i];
-          returnedOutputSats += out.satoshis ?? 0;
-          console.log(`  [${i}] ${out.satoshis} sats, script=${out.lockingScript?.toHex().length ?? 0} chars`);
-        }
-        const finalFee = returnedInputSats - returnedOutputSats;
-        console.log(`[sweepOrdinals] Final: Total in=${returnedInputSats}, Total out=${returnedOutputSats}, Fee=${finalFee} sats`);
-        console.log(`[sweepOrdinals] Final tx hex: ${returnedTx.toHex()}`);
-        console.log(`[sweepOrdinals] Final tx computed id: ${returnedTx.id("hex")}`);
 
-        // Check if fee seems too low (less than 1 sat/byte)
-        const txSize = returnedTx.toHex().length / 2;
-        const satPerByte = finalFee / txSize;
-        console.log(`[sweepOrdinals] Tx size: ${txSize} bytes, Fee rate: ${satPerByte.toFixed(2)} sat/byte`);
-        if (satPerByte < 0.5) {
-          console.warn(`[sweepOrdinals] WARNING: Fee rate seems very low!`);
+        await tx.sign();
+
+        // Log signed transaction details for debugging
+        const localTxid = tx.id("hex");
+        console.log(`[sweepOrdinals] === LOCAL SIGNED TX ===`);
+        console.log(`[sweepOrdinals] Local txid: ${localTxid}`);
+        console.log(`[sweepOrdinals] Signed tx hex: ${tx.toHex()}`);
+
+        // Extract unlocking scripts for signAction
+        const spends: Record<number, { unlockingScript: string }> = {};
+        console.log(`[sweepOrdinals] === UNLOCKING SCRIPTS FOR SIGNACTION ===`);
+        for (let i = 0; i < tx.inputs.length; i++) {
+          const txInput = tx.inputs[i];
+          const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
+
+          if (ourOutpoints.has(inputOutpoint)) {
+            const unlockHex = txInput.unlockingScript?.toHex() ?? "";
+            spends[i] = { unlockingScript: unlockHex };
+            console.log(`  [${i}] ${inputOutpoint}: ${unlockHex.length} chars`);
+          } else {
+            console.log(`  [${i}] ${inputOutpoint}: (wallet input - not ours)`);
+          }
         }
+
+        // Complete the action with our signatures
+        const signResult = await ctx.wallet.signAction({
+          reference: createResult.signableTransaction.reference,
+          spends,
+          options: { acceptDelayedBroadcast: false },
+        });
+
+        if ("error" in signResult) {
+          return { error: String(signResult.error) };
+        }
+
+        // Debug: compare local vs signAction result
+        console.log(`[sweepOrdinals] === SIGN ACTION RESULT ===`);
+        console.log(`[sweepOrdinals] signAction txid: ${signResult.txid}`);
+        // Log broadcast results if available
+        if ("sendWithResults" in signResult) {
+          console.log(
+            `[sweepOrdinals] sendWithResults:`,
+            JSON.stringify(
+              (signResult as { sendWithResults?: unknown }).sendWithResults,
+            ),
+          );
+        }
+        console.log(`[sweepOrdinals] Local txid (partial): ${localTxid}`);
+        console.log(
+          `[sweepOrdinals] Note: TXIDs differ because local is partial (wallet input unsigned)`,
+        );
+
+        if (signResult.tx) {
+          // Parse returned BEEF to show final transaction structure
+          const returnedTx = Transaction.fromBEEF(signResult.tx);
+          console.log(`[sweepOrdinals] === FINAL TX STRUCTURE (broadcast) ===`);
+          console.log(
+            `[sweepOrdinals] Final inputs (${returnedTx.inputs.length}):`,
+          );
+          let returnedInputSats = 0;
+          for (let i = 0; i < returnedTx.inputs.length; i++) {
+            const inp = returnedTx.inputs[i];
+            const sats =
+              inp.sourceTransaction?.outputs[inp.sourceOutputIndex]?.satoshis ??
+              0;
+            returnedInputSats += sats;
+            const isOurs = ourOutpoints.has(
+              `${inp.sourceTXID}.${inp.sourceOutputIndex}`,
+            );
+            console.log(
+              `  [${i}] ${inp.sourceTXID?.slice(0, 8)}...:${inp.sourceOutputIndex} = ${sats} sats, unlock=${inp.unlockingScript?.toHex().length ?? 0} chars ${isOurs ? "(ours)" : "(wallet fee)"}`,
+            );
+          }
+          console.log(
+            `[sweepOrdinals] Final outputs (${returnedTx.outputs.length}):`,
+          );
+          let returnedOutputSats = 0;
+          for (let i = 0; i < returnedTx.outputs.length; i++) {
+            const out = returnedTx.outputs[i];
+            returnedOutputSats += out.satoshis ?? 0;
+            console.log(
+              `  [${i}] ${out.satoshis} sats, script=${out.lockingScript?.toHex().length ?? 0} chars`,
+            );
+          }
+          const finalFee = returnedInputSats - returnedOutputSats;
+          console.log(
+            `[sweepOrdinals] Final: Total in=${returnedInputSats}, Total out=${returnedOutputSats}, Fee=${finalFee} sats`,
+          );
+          console.log(`[sweepOrdinals] Final tx hex: ${returnedTx.toHex()}`);
+          console.log(
+            `[sweepOrdinals] Final tx computed id: ${returnedTx.id("hex")}`,
+          );
+
+          // Check if fee seems too low (less than 1 sat/byte)
+          const txSize = returnedTx.toHex().length / 2;
+          const satPerByte = finalFee / txSize;
+          console.log(
+            `[sweepOrdinals] Tx size: ${txSize} bytes, Fee rate: ${satPerByte.toFixed(2)} sat/byte`,
+          );
+          if (satPerByte < 0.5) {
+            console.warn(`[sweepOrdinals] WARNING: Fee rate seems very low!`);
+          }
+        }
+
+        return {
+          txid: signResult.txid,
+          beef: signResult.tx ? Array.from(signResult.tx) : undefined,
+        };
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : "unknown-error",
+        };
       }
-
-      return {
-        txid: signResult.txid,
-        beef: signResult.tx ? Array.from(signResult.tx) : undefined,
-      };
-    } catch (error) {
-      return {
-        error: error instanceof Error ? error.message : "unknown-error",
-      };
-    }
-  },
-};
+    },
+  };
 
 /**
  * Sweep BSV-21 tokens from external inputs into the destination wallet.
@@ -615,12 +709,27 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
             type: "object",
             properties: {
               outpoint: { type: "string", description: "Outpoint (txid_vout)" },
-              satoshis: { type: "integer", description: "Satoshis (should be 1)" },
-              lockingScript: { type: "string", description: "Locking script hex" },
-              tokenId: { type: "string", description: "Token ID (txid_vout format)" },
+              satoshis: {
+                type: "integer",
+                description: "Satoshis (should be 1)",
+              },
+              lockingScript: {
+                type: "string",
+                description: "Locking script hex",
+              },
+              tokenId: {
+                type: "string",
+                description: "Token ID (txid_vout format)",
+              },
               amount: { type: "string", description: "Token amount as string" },
             },
-            required: ["outpoint", "satoshis", "lockingScript", "tokenId", "amount"],
+            required: [
+              "outpoint",
+              "satoshis",
+              "lockingScript",
+              "tokenId",
+              "amount",
+            ],
           },
         },
         wif: {
@@ -661,7 +770,9 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
 
       // Fetch BEEF for all input transactions and merge them
       const txids = [...new Set(inputs.map((i) => i.outpoint.split("_")[0]))];
-      console.log(`[sweepBsv21] Fetching BEEF for ${txids.length} transactions`);
+      console.log(
+        `[sweepBsv21] Fetching BEEF for ${txids.length} transactions`,
+      );
 
       const firstBeef = await ctx.services.getBeefForTxid(txids[0]);
       for (let i = 1; i < txids.length; i++) {
@@ -669,7 +780,9 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         firstBeef.mergeBeef(additionalBeef);
       }
 
-      console.log(`[sweepBsv21] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`);
+      console.log(
+        `[sweepBsv21] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`,
+      );
 
       // Build input descriptors
       const inputDescriptors = inputs.map((input) => {
@@ -697,10 +810,14 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         return { error: "failed-to-derive-key" };
       }
 
-      const derivedAddress = PublicKey.fromString(pubKeyResult.publicKey).toAddress();
+      const derivedAddress = PublicKey.fromString(
+        pubKeyResult.publicKey,
+      ).toAddress();
       const p2pkh = new P2PKH();
       const destinationLockingScript = p2pkh.lock(derivedAddress);
-      const transferScript = BSV21.transfer(tokenId, totalAmount).lock(destinationLockingScript);
+      const transferScript = BSV21.transfer(tokenId, totalAmount).lock(
+        destinationLockingScript,
+      );
 
       outputs.push({
         lockingScript: transferScript.toHex(),
@@ -750,7 +867,7 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         inputs.map((input) => {
           const [txid, vout] = input.outpoint.split("_");
           return `${txid}.${vout}`;
-        })
+        }),
       );
 
       // Set up P2PKH unlocker on each input we control
@@ -776,7 +893,9 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
 
         if (ourOutpoints.has(inputOutpoint)) {
-          spends[i] = { unlockingScript: txInput.unlockingScript?.toHex() ?? "" };
+          spends[i] = {
+            unlockingScript: txInput.unlockingScript?.toHex() ?? "",
+          };
         }
       }
 
@@ -794,8 +913,12 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
       // Submit to overlay service for indexing
       if (signResult.tx) {
         try {
-          const services = ctx.services as import("../../services/OneSatServices").OneSatServices;
-          const overlayResult = await services.overlay.submitBsv21(signResult.tx, tokenId);
+          const services =
+            ctx.services as import("../../services/OneSatServices").OneSatServices;
+          const overlayResult = await services.overlay.submitBsv21(
+            signResult.tx,
+            tokenId,
+          );
           console.log(`[sweepBsv21] Overlay submission result:`, overlayResult);
         } catch (overlayError) {
           // Log but don't fail the sweep - tx is already broadcast

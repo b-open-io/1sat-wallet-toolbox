@@ -74,7 +74,9 @@ export interface WebWalletResult {
   /** Cleanup function - stops monitor, destroys wallet */
   destroy: () => Promise<void>;
   /** Full sync with remote backup (only available if remoteStorageUrl was provided and connected) */
-  fullSync?: (onProgress?: (stage: FullSyncStage, message: string) => void) => Promise<FullSyncResult>;
+  fullSync?: (
+    onProgress?: (stage: FullSyncStage, message: string) => void,
+  ) => Promise<FullSyncResult>;
   /** Storage manager (for debugging/diagnostics) */
   storage: WalletStorageManager;
   /** Remote storage client (for debugging/diagnostics, undefined if not connected) */
@@ -208,7 +210,10 @@ export async function createWebWallet(
     backups: storage.getBackupStores(),
     conflictingActives: storage.getConflictingStores(),
     isActiveEnabled: storage.isActiveEnabled,
-    allStores: stores.map(s => ({ name: s.storageName, key: s.storageIdentityKey.slice(0, 16) + "..." })),
+    allStores: stores.map((s) => ({
+      name: s.storageName,
+      key: s.storageIdentityKey.slice(0, 16) + "...",
+    })),
   });
 
   // 7. Handle conflicting actives or sync to backups
@@ -269,7 +274,10 @@ export async function createWebWallet(
     unprovenAttemptsLimitMain: 144,
   });
   monitor.addDefaultTasks();
-  console.log("[createWebWallet] Monitor created with tasks:", monitor["_tasks"].map((t: { name: string }) => t.name));
+  console.log(
+    "[createWebWallet] Monitor created with tasks:",
+    monitor["_tasks"].map((t: { name: string }) => t.name),
+  );
 
   // Helper to sync to remote backup using public updateBackups API
   const syncToBackup = async (context: string): Promise<void> => {
@@ -306,7 +314,12 @@ export async function createWebWallet(
   };
 
   monitor.onTransactionProven = async (status) => {
-    console.log("[Monitor] Transaction proven:", status.txid, "block", status.blockHeight);
+    console.log(
+      "[Monitor] Transaction proven:",
+      status.txid,
+      "block",
+      status.blockHeight,
+    );
 
     // Sync to remote backup first (if connected)
     if (remoteClient) {
@@ -337,7 +350,9 @@ export async function createWebWallet(
 
   // 12. Create fullSync function if remote storage is connected
   const fullSyncFn = remoteClient
-    ? async (onProgress?: (stage: FullSyncStage, message: string) => void): Promise<FullSyncResult> => {
+    ? async (
+        onProgress?: (stage: FullSyncStage, message: string) => void,
+      ): Promise<FullSyncResult> => {
         return fullSync({
           storage,
           remoteStorage: remoteClient,

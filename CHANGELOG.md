@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.59] - 2026-02-01
+
+### Changed
+
+- **Outpoint format standardization** - `Outpoint.toString()` now returns SDK canonical format (`txid.vout`) instead of underscore format
+- Added `Outpoint.toOrdinalString()` for legacy 1sat format (`txid_vout`) used by ordinal origins and BSV21 tokenIds
+- Constructor now accepts both period and underscore separators when parsing outpoint strings
+- Aligns with go-sdk pattern where `String()` returns period format and `OrdinalString()` returns underscore format
+
+### Fixed
+
+- Import ordering and formatting cleanup via Biome
+
 ## [0.0.57] - 2026-01-29
 
 ### Fixed

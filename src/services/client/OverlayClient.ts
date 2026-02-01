@@ -1,5 +1,5 @@
-import { BaseClient } from "./BaseClient";
 import type { ClientOptions } from "../types";
+import { BaseClient } from "./BaseClient";
 
 /** Topic manager metadata returned by listTopicManagers */
 export interface TopicManagerInfo {
@@ -36,16 +36,18 @@ export class OverlayClient extends BaseClient {
    */
   async listTopicManagers(): Promise<Record<string, TopicManagerInfo>> {
     return this.request<Record<string, TopicManagerInfo>>(
-      "/1sat/overlay/listTopicManagers"
+      "/1sat/overlay/listTopicManagers",
     );
   }
 
   /**
    * List all registered lookup service providers.
    */
-  async listLookupServiceProviders(): Promise<Record<string, LookupServiceInfo>> {
+  async listLookupServiceProviders(): Promise<
+    Record<string, LookupServiceInfo>
+  > {
     return this.request<Record<string, LookupServiceInfo>>(
-      "/1sat/overlay/listLookupServiceProviders"
+      "/1sat/overlay/listLookupServiceProviders",
     );
   }
 
@@ -94,7 +96,7 @@ export class OverlayClient extends BaseClient {
    */
   async submit(
     beef: Uint8Array | number[],
-    topics: string[]
+    topics: string[],
   ): Promise<{ status: string; txid?: string; message?: string }> {
     const beefArray = beef instanceof Uint8Array ? Array.from(beef) : beef;
 
@@ -107,7 +109,7 @@ export class OverlayClient extends BaseClient {
           "X-Topics": JSON.stringify(topics),
         },
         body: new Blob([new Uint8Array(beefArray)]),
-      }
+      },
     );
   }
 
@@ -119,7 +121,7 @@ export class OverlayClient extends BaseClient {
    */
   async submitBsv21(
     beef: Uint8Array | number[],
-    tokenId: string
+    tokenId: string,
   ): Promise<{ status: string; txid?: string; message?: string }> {
     return this.submit(beef, [`tm_${tokenId}`]);
   }

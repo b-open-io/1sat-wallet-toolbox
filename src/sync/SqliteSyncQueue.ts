@@ -136,7 +136,9 @@ export class SqliteSyncQueue implements SyncQueueStorage {
 
     for (const txid of txids) {
       const rows = this.db
-        .prepare("SELECT * FROM queue WHERE outpoint LIKE ? AND status = 'pending'")
+        .prepare(
+          "SELECT * FROM queue WHERE outpoint LIKE ? AND status = 'pending'",
+        )
         .all(`${txid}%`) as RawQueueRow[];
 
       if (rows.length > 0) {
