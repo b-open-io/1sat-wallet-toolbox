@@ -210,6 +210,7 @@ export class OneSatServices implements WalletServices {
 
   async postBeef(beef: Beef, txids: string[]): Promise<PostBeefResult[]> {
     console.log("[OneSatServices] postBeef called with txids:", txids);
+    console.log("[OneSatServices] BEEF structure:\n" + beef.toLogString());
     const results: PostBeefResult[] = [];
 
     for (const txid of txids) {

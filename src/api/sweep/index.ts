@@ -175,6 +175,7 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
       console.log(
         `[sweep] Merged BEEF valid=${firstBeef.isValid()}, txs=${firstBeef.txs.length}`,
       );
+      console.log(`[sweep] BEEF structure:\n${firstBeef.toLogString()}`);
 
       // Build input descriptors (we'll sign after getting the final transaction)
       const inputDescriptors = inputs.map((input) => {
@@ -295,6 +296,19 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
         beef: signResult.tx ? Array.from(signResult.tx) : undefined,
       };
     } catch (error) {
+      // Log detailed error info for WERR_REVIEW_ACTIONS
+      if (error && typeof error === "object" && "sendWithResults" in error) {
+        const werr = error as {
+          sendWithResults?: unknown;
+          txid?: string;
+          message?: string;
+        };
+        console.error("[sweep] WERR_REVIEW_ACTIONS details:", {
+          message: werr.message,
+          txid: werr.txid,
+          sendWithResults: JSON.stringify(werr.sendWithResults, null, 2),
+        });
+      }
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
