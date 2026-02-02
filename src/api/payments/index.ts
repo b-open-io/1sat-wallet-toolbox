@@ -6,7 +6,12 @@
 
 import { Inscription } from "@bopen-io/templates";
 import { type CreateActionOutput, P2PKH, Script, Utils } from "@bsv/sdk";
-import { FUNDING_BASKET } from "../constants";
+
+/**
+ * Magic constant that tells the wallet to send all available funds minus fees.
+ * When an output has this satoshis value, it's adjusted to the maximum fundable amount.
+ */
+const maxPossibleSatoshis = 2099999999999999;
 import type { Skill } from "../skills/types";
 
 // ============================================================================
@@ -213,42 +218,14 @@ export const sendAllBsv: Skill<SendAllBsvInput, SendBsvResponse> = {
         return { error: "paymail-not-yet-implemented" };
       }
 
-      const listResult = await ctx.wallet.listOutputs({
-        basket: FUNDING_BASKET,
-        include: "locking scripts",
-        limit: 10000,
-      });
-
-      if (!listResult.outputs || listResult.outputs.length === 0) {
-        return { error: "no-funds" };
-      }
-
-      const totalSats = listResult.outputs.reduce(
-        (sum, o) => sum + o.satoshis,
-        0,
-      );
-      const estimatedFee = Math.ceil(
-        (listResult.outputs.length * 150 + 44) * 1,
-      );
-      const sendAmount = totalSats - estimatedFee;
-
-      if (sendAmount <= 0) {
-        return { error: "insufficient-funds-for-fee" };
-      }
-
-      const inputs = listResult.outputs.map((o) => ({
-        outpoint: o.outpoint,
-        inputDescription: "Sweep funds",
-      }));
-
       const result = await ctx.wallet.createAction({
         description: "Send all BSV",
-        inputs,
         outputs: [
           {
             lockingScript: new P2PKH().lock(destination).toHex(),
-            satoshis: sendAmount,
+            satoshis: maxPossibleSatoshis,
             outputDescription: "Sweep all funds",
+            tags: [],
           },
         ],
         options: { signAndProcess: true, acceptDelayedBroadcast: false },
