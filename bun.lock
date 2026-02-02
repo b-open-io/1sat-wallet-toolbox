@@ -13,14 +13,14 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
-        "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@^1.7.22-idb-fix.1",
-        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.22-idb-fix.1",
+        "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@^1.7.22-idb-fix.3",
+        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.22-idb-fix.3",
         "@types/bun": "^1.3.4",
         "@types/chrome": "^0.1.32",
         "typescript": "^5.9.3",
       },
       "peerDependencies": {
-        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.22-idb-fix.1",
+        "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@^1.7.22-idb-fix.3",
       },
       "optionalPeers": [
         "@bsv/wallet-toolbox-mobile",
@@ -56,9 +56,9 @@
 
     "@bsv/sdk": ["@bsv/sdk@1.10.3", "", {}, "sha512-3olJE3s3pttwVFd/OYuTeXmllFwNTYPwu5EdD9NV8am70eJjTBPq4JTq4Q1vZG/pFZm3A4a99WMzdq8f6Wmu7w=="],
 
-    "@bsv/wallet-toolbox": ["@bopen-io/wallet-toolbox@1.7.22-idb-fix.1", "", { "dependencies": { "@bsv/auth-express-middleware": "^1.2.3", "@bsv/payment-express-middleware": "^1.2.3", "@bsv/sdk": "^1.10.2", "express": "^4.21.2", "idb": "^8.0.2", "knex": "^3.1.0", "mysql2": "^3.12.0", "sqlite3": "^5.1.7", "ws": "^8.18.3" } }, "sha512-XVyLjvjJLYVcZac2IWM2YElmGtwvvRSSeyuU8MC4DMHyrawoiNiYCnB5cr+Ht3Uoi/tnYyfn1WLy69aWX0BNhg=="],
+    "@bsv/wallet-toolbox": ["@bopen-io/wallet-toolbox@1.7.22-idb-fix.3", "", { "dependencies": { "@bsv/auth-express-middleware": "^1.2.3", "@bsv/payment-express-middleware": "^1.2.3", "@bsv/sdk": "^1.10.2", "express": "^4.21.2", "idb": "^8.0.2", "knex": "^3.1.0", "mysql2": "^3.12.0", "sqlite3": "^5.1.7", "ws": "^8.18.3" } }, "sha512-TfCdiv2agCr+k7r6qYhAxcJnR/yyKIY5auvaKprcnuqVgoyFFhEg7zltK+Gn1HzZtHt8VmqgAysGHavaQFQBYA=="],
 
-    "@bsv/wallet-toolbox-mobile": ["@bopen-io/wallet-toolbox-mobile@1.7.22-idb-fix.1", "", { "dependencies": { "@bsv/sdk": "^1.9.29" } }, "sha512-mIZfFMvmwE9o/0KbtSpD8RXRFDrL6g39GGv2DKfxjPieV4DBAT0MrBKyYleBZG2SjOVO1fQhXdJFOo47eL5/fw=="],
+    "@bsv/wallet-toolbox-mobile": ["@bopen-io/wallet-toolbox-mobile@1.7.22-idb-fix.3", "", { "dependencies": { "@bsv/sdk": "^1.9.29" } }, "sha512-Nle/KBMuQ5eLhmQZZCaBBUCO3wbwHZ+49BCfAPUwZmqli2DVjvA7fJBH052/V8caeEYb+MwE18hv/OvQ7dH71Q=="],
 
     "@gar/promisify": ["@gar/promisify@1.1.3", "", {}, "sha512-k2Ty1JcVojjJFwrg/ThKi2ujJ7XNLYaFGNB/bWT9wGR+oSMJHMa5w+CUq6p/pVrKeNNgA7pCqEcjSnHVoqJQFw=="],
 
