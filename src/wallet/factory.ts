@@ -228,6 +228,25 @@ export async function createWebWallet(
     isActiveEnabled: storage.isActiveEnabled,
   });
 
+  // Handle conflicting actives - must resolve before wallet can function
+  if (storage.getConflictingStores().length > 0) {
+    const localKey = storage.getActiveStore();
+    console.log("[createWebWallet] Resolving conflicting actives...");
+    try {
+      await storage.setActive(localKey, (msg: string) => {
+        console.log("[createWebWallet] Conflict resolution:", msg);
+        return msg;
+      });
+      console.log("[createWebWallet] Conflict resolution complete");
+    } catch (err: unknown) {
+      console.log(
+        "[createWebWallet] Conflict resolution failed, falling back to local-only:",
+        err instanceof Error ? err.message : err,
+      );
+      remoteClient = undefined;
+    }
+  }
+
   // Helper to sync to remote backup using public updateBackups API
   const syncToBackup = async (context: string): Promise<void> => {
     if (storage.getBackupStores().length > 0) {
