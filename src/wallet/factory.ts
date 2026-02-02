@@ -157,7 +157,7 @@ export async function createWebWallet(
   await localStorage.migrate(DEFAULT_DATABASE_NAME, config.storageIdentityKey);
 
   // 4. Create storage manager with local-only storage initially (empty backups)
-  const storage = new WalletStorageManager(identityPubKey, localStorage, []);
+  let storage = new WalletStorageManager(identityPubKey, localStorage, []);
   await storage.makeAvailable();
 
   // 5. Create the underlying Wallet FIRST (needed for StorageClient signing)
@@ -225,8 +225,8 @@ export async function createWebWallet(
   });
 
   // 7. Handle conflicting actives or sync to backups
-  const conflictingStores = storage.getConflictingStores();
-  const backupStores = storage.getBackupStores();
+  let conflictingStores = storage.getConflictingStores();
+  let backupStores = storage.getBackupStores();
 
   if (conflictingStores.length > 0) {
     const localKey = storage.getActiveStore();
@@ -242,6 +242,21 @@ export async function createWebWallet(
         "[createWebWallet] Conflict resolution failed:",
         err instanceof Error ? err.message : err,
       );
+      // FALLBACK: If conflict resolution fails, operate in local-only mode
+      // This allows the wallet to function even when remote sync is broken
+      console.log(
+        "[createWebWallet] Falling back to local-only mode (remote disabled)",
+      );
+      // Recreate storage manager with only local storage to clear conflicts
+      storage = new WalletStorageManager(identityPubKey, localStorage, []);
+      await storage.makeAvailable();
+      // Update the wallet's storage reference
+      (underlyingWallet as unknown as { storage: WalletStorageManager }).storage = storage;
+      remoteClient = undefined;
+      // Refresh conflict state
+      conflictingStores = storage.getConflictingStores();
+      backupStores = storage.getBackupStores();
+      console.log("[createWebWallet] Local-only mode active, isActiveEnabled:", storage.isActiveEnabled);
     }
   } else if (backupStores.length > 0) {
     // No conflicts - push local state to remote backup (fire-and-forget)
