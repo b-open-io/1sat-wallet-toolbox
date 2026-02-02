@@ -277,14 +277,54 @@ export async function createWebWallet(
       });
   }
 
-  // 8. Wrap with permissions manager
+  // Helper to sync to remote backup using public updateBackups API
+  const syncToBackup = async (context: string): Promise<void> => {
+    if (storage.getBackupStores().length > 0) {
+      await storage.updateBackups(undefined, (msg: string) => {
+        console.log(`[createWebWallet] ${context}:`, msg);
+        return msg;
+      });
+    }
+  };
+
+  // 8. Intercept createAction/signAction to sync after immediate broadcasts
+  // With acceptDelayedBroadcast: false, broadcasts happen synchronously and
+  // bypass the monitor's onTransactionBroadcasted callback. We detect broadcasts
+  // by checking for txid in the result and sync to backup immediately.
+  if (remoteClient) {
+    const originalCreateAction = underlyingWallet.createAction.bind(underlyingWallet);
+    underlyingWallet.createAction = async (args) => {
+      const result = await originalCreateAction(args);
+      if (result.txid) {
+        console.log("[createWebWallet] Broadcast detected in createAction:", result.txid);
+        syncToBackup("Backup after createAction").catch((err) => {
+          console.warn("[createWebWallet] Failed to sync after createAction:", err);
+        });
+      }
+      return result;
+    };
+
+    const originalSignAction = underlyingWallet.signAction.bind(underlyingWallet);
+    underlyingWallet.signAction = async (args) => {
+      const result = await originalSignAction(args);
+      if (result.txid) {
+        console.log("[createWebWallet] Broadcast detected in signAction:", result.txid);
+        syncToBackup("Backup after signAction").catch((err) => {
+          console.warn("[createWebWallet] Failed to sync after signAction:", err);
+        });
+      }
+      return result;
+    };
+  }
+
+  // 9. Wrap with permissions manager
   const wallet = new WalletPermissionsManager(
     underlyingWallet,
     adminOriginator,
     permissionsConfig,
   );
 
-  // 9. Create monitor (not started - consumer calls startTasks() when ready)
+  // 10. Create monitor (not started - consumer calls startTasks() when ready)
   const monitor = new Monitor({
     chain,
     services: oneSatServices as unknown as typeof fallbackServices,
@@ -302,27 +342,20 @@ export async function createWebWallet(
     monitor["_tasks"].map((t: { name: string }) => t.name),
   );
 
-  // Helper to sync to remote backup using public updateBackups API
-  const syncToBackup = async (context: string): Promise<void> => {
-    if (storage.getBackupStores().length > 0) {
-      await storage.updateBackups(undefined, (msg: string) => {
-        console.log(`[Monitor] ${context}:`, msg);
-        return msg;
-      });
-    }
-  };
-
-  // 10. Wire up monitor callbacks - sync to remote first, then call user callbacks
+  // 11. Wire up monitor callbacks - sync to remote first, then call user callbacks
+  // Note: For delayed broadcasts, the monitor triggers these. For immediate broadcasts,
+  // the interception in step 8 handles the sync, but these still fire for the user callback.
   monitor.onTransactionBroadcasted = async (result) => {
-    console.log("[Monitor] Transaction broadcasted:", result.txid);
+    console.log("[createWebWallet] Monitor detected broadcast:", result.txid);
 
     // Sync to remote backup first (if connected)
+    // Note: For immediate broadcasts, step 8 already synced, but this is harmless
     if (remoteClient) {
       try {
-        await syncToBackup("Backup after broadcast");
-        console.log("[Monitor] Synced to backup after broadcast");
+        await syncToBackup("Backup after monitor broadcast");
+        console.log("[createWebWallet] Synced to backup after monitor broadcast");
       } catch (err) {
-        console.warn("[Monitor] Failed to sync after broadcast:", err);
+        console.warn("[createWebWallet] Failed to sync after monitor broadcast:", err);
       }
     }
 
@@ -331,14 +364,14 @@ export async function createWebWallet(
       try {
         config.onTransactionBroadcasted(result.txid);
       } catch (err) {
-        console.warn("[Monitor] User callback error after broadcast:", err);
+        console.warn("[createWebWallet] User callback error after broadcast:", err);
       }
     }
   };
 
   monitor.onTransactionProven = async (status) => {
     console.log(
-      "[Monitor] Transaction proven:",
+      "[createWebWallet] Transaction proven:",
       status.txid,
       "block",
       status.blockHeight,
@@ -348,9 +381,9 @@ export async function createWebWallet(
     if (remoteClient) {
       try {
         await syncToBackup("Backup after confirmation");
-        console.log("[Monitor] Synced to backup after confirmation");
+        console.log("[createWebWallet] Synced to backup after confirmation");
       } catch (err) {
-        console.warn("[Monitor] Failed to sync after confirmation:", err);
+        console.warn("[createWebWallet] Failed to sync after confirmation:", err);
       }
     }
 
@@ -359,19 +392,19 @@ export async function createWebWallet(
       try {
         config.onTransactionProven(status.txid, status.blockHeight);
       } catch (err) {
-        console.warn("[Monitor] User callback error after proven:", err);
+        console.warn("[createWebWallet] User callback error after proven:", err);
       }
     }
   };
 
-  // 11. Create cleanup function
+  // 12. Create cleanup function
   const destroy = async (): Promise<void> => {
     monitor.stopTasks();
     await monitor.destroy();
     await underlyingWallet.destroy();
   };
 
-  // 12. Create fullSync function if remote storage is connected
+  // 13. Create fullSync function if remote storage is connected
   const fullSyncFn = remoteClient
     ? async (
         onProgress?: (stage: FullSyncStage, message: string) => void,
