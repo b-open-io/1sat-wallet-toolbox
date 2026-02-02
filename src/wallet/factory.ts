@@ -169,14 +169,14 @@ export async function createWebWallet(
   });
 
   // 6. Attempt remote storage connection AFTER wallet exists
+  // Push-only backup: no sync on startup, just connect for incremental backups
+  // Use fullSync() explicitly to restore from backup when needed
   let remoteClient: StorageClient | undefined;
   if (config.remoteStorageUrl) {
     console.log(
       `[createWebWallet] Attempting remote storage connection to ${config.remoteStorageUrl}`,
     );
     try {
-      // Create StorageClient with the REAL wallet (not a temp wallet)
-      // StorageClient captures the wallet at construction for signing requests
       remoteClient = new StorageClient(
         underlyingWallet as unknown as WalletInterface,
         config.remoteStorageUrl,
@@ -189,58 +189,12 @@ export async function createWebWallet(
       );
       await Promise.race([remoteClient.makeAvailable(), timeoutPromise]);
 
-      // Add remote storage to the existing storage manager using public API
+      // Add remote as backup destination (push-only, no pull)
       await storage.addWalletStorageProvider(remoteClient);
-      console.log("[createWebWallet] Remote storage connected successfully");
-
-      // Bidirectional sync: pull first, then push
-      // Pull builds idMap via natural key matching (reference for transactions)
-      // Push sends local changes to remote
-      console.log("[createWebWallet] Pulling from remote...");
-      const pullResult = await storage.syncFromReader(
-        identityPubKey,
-        remoteClient,
-      );
-      console.log(
-        `[createWebWallet] Pulled: ${pullResult.inserts} inserts, ${pullResult.updates} updates`,
-      );
-
-      console.log("[createWebWallet] Pushing to remote...");
-      await storage.updateBackups(undefined, (msg: string) => {
-        console.log("[createWebWallet] Push:", msg);
-        return msg;
-      });
-      console.log("[createWebWallet] Push complete");
+      console.log("[createWebWallet] Remote backup connected");
     } catch (err) {
       console.log(
-        "[createWebWallet] Remote storage connection failed:",
-        err instanceof Error ? err.message : err,
-      );
-      remoteClient = undefined;
-    }
-  }
-
-  // Log storage state for debugging
-  console.log("[createWebWallet] Storage state:", {
-    activeKey: storage.getActiveStore(),
-    backups: storage.getBackupStores().length,
-    conflictingActives: storage.getConflictingStores().length,
-    isActiveEnabled: storage.isActiveEnabled,
-  });
-
-  // Handle conflicting actives - must resolve before wallet can function
-  if (storage.getConflictingStores().length > 0) {
-    const localKey = storage.getActiveStore();
-    console.log("[createWebWallet] Resolving conflicting actives...");
-    try {
-      await storage.setActive(localKey, (msg: string) => {
-        console.log("[createWebWallet] Conflict resolution:", msg);
-        return msg;
-      });
-      console.log("[createWebWallet] Conflict resolution complete");
-    } catch (err: unknown) {
-      console.log(
-        "[createWebWallet] Conflict resolution failed, falling back to local-only:",
+        "[createWebWallet] Remote backup connection failed:",
         err instanceof Error ? err.message : err,
       );
       remoteClient = undefined;

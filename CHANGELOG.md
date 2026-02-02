@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.70] - 2026-02-02
+
+### Changed
+
+- **Push-only backup** - Simplified remote storage to push-only incremental backup. Removed bidirectional sync and conflict resolution on startup which caused "Result must be unique" errors across devices. Use `fullSync()` explicitly to restore from backup.
+
 ## [0.0.69] - 2026-02-02
 
 ### Fixed
