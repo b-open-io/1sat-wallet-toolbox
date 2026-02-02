@@ -567,51 +567,33 @@ CREATE UNIQUE INDEX idx_user_storage_device ON sync_states(user_id, storage_iden
 
 ### Implementation Tasks
 
-**PR 1: go-wallet-toolbox (server)** - ✅ COMPLETE (branch: `feat/device-id-sync-isolation`)
-- [x] Add `DeviceID` field to `RequestSyncChunkArgs` struct
-- [x] Add `DeviceID` field to `TableSyncState` API response type
-- [x] Add `DeviceID` column to `SyncState` model with default `""`
-- [x] Update `idx_user_storage_key` → `idx_user_storage_device` index
-- [x] Update `FindSyncState` to include deviceID in WHERE clause
-- [x] Update `CreateSyncState` to include deviceID
-- [x] Update `FindOrInsertSyncStateAuth` signature (deviceID added as last param after storageName)
-- [x] Update all callers: provider, client_gen, rpc_server, mocks, sync_to_writer
-- [x] Database migration handled by GORM AutoMigrate (no manual migration needed)
-- [x] All tests pass
+**APPROACH REVISED (2026-02-02)**: After discussion with Tone Engel, we learned that
+`storageIdentityKey` was already designed to be unique per storage instance (device).
+The bug was in 1sat-wallet-toolbox which incorrectly used `identityPubKey` as the
+`storageIdentityKey`, causing all devices with the same wallet to share one SyncState.
 
-**Files modified (14 total):**
-- `pkg/wdk/storage_request_sync_chunk_args.go` - Added DeviceID to RequestSyncChunkArgs
-- `pkg/wdk/table_sync_state.go` - Added DeviceID to TableSyncState
-- `pkg/wdk/storage.interface.go` - Updated FindOrInsertSyncStateAuth signature
-- `pkg/internal/storage/database/models/sync_state.go` - Added DeviceID column with new index
-- `pkg/internal/storage/entity/sync_state.go` - Added DeviceID field and ToWDK mapping
-- `pkg/internal/storage/repo/sync_state.go` - Updated FindSyncState, CreateSyncState, mapper
-- `pkg/storage/internal/sync/repos.interface.go` - Updated interface
-- `pkg/storage/internal/sync/find_or_insert_sync_state.go` - Added deviceID parameter
-- `pkg/storage/internal/sync/chunk_processor.go` - Pass args.DeviceID to FindSyncState
-- `pkg/storage/internal/sync/sync_to_writer.go` - Uses empty deviceID for server-to-server sync
-- `pkg/storage/provider.go` - Updated implementation
-- `pkg/storage/client_gen.go` - Updated client wrapper
-- `pkg/storage/internal/server/rpc_storage_provider.gen.go` - Updated RPC server
-- `pkg/internal/mocks/mock_wallet_storage_writer.go` - Updated mock
+The fix is simpler: make 1sat-wallet-toolbox accept a unique `storageIdentityKey` from
+the consuming application, rather than modifying the sync protocol.
 
-**PR 2: wallet-toolbox (client library)** - ✅ COMPLETE (branch: `fix/idb-transaction-auto-commit`)
-- [x] Add `deviceId?: string` to `RequestSyncChunkArgs` interface in `WalletStorage.interfaces.ts`
-- [x] Add `deviceId?: string` to `TableSyncState` interface
-- [x] Add `deviceId?: string` to `StorageClient` constructor
-- [x] Update `findOrInsertSyncStateAuth` signature (deviceId as last param)
-- [x] Update `StorageReaderWriter`, `StorageMobile` implementations
-- [x] Add Knex migration for existing databases
-- [x] Add IndexedDB `deviceId` filter to `findSyncStates`
+**ABANDONED: go-wallet-toolbox changes** - No changes needed
+- The server already supports per-device isolation via `(userId, storageIdentityKey)` unique key
 
-**Files modified (8 total):**
-- `src/storage/schema/tables/TableSyncState.ts` - Added deviceId field
-- `src/sdk/WalletStorage.interfaces.ts` - Added deviceId to RequestSyncChunkArgs and interface
-- `src/storage/remoting/StorageClient.ts` - Accept deviceId in constructor
-- `src/storage/remoting/StorageMobile.ts` - Same as StorageClient
-- `src/storage/StorageReaderWriter.ts` - Include deviceId in sync state queries
-- `src/storage/schema/entities/EntitySyncState.ts` - Updated fromStorage signature
-- `src/storage/schema/KnexMigrations.ts` - Added migration + initial schema
+**ABANDONED: wallet-toolbox deviceId changes** - REVERTED
+- Published `@bopen-io/wallet-toolbox@1.7.22-idb-fix.2` which reverts the deviceId additions
+- The existing `storageIdentityKey` mechanism is sufficient
+
+**PR: 1sat-wallet-toolbox** - ✅ COMPLETE
+- [x] Rename `deviceId` to `storageIdentityKey` in `WebWalletConfig` interface
+- [x] Make `storageIdentityKey` a required field
+- [x] Use `config.storageIdentityKey` in `migrate()` instead of `identityPubKey`
+- [x] Remove obsolete `deviceId` parameter from `StorageClient` constructor call
+
+**Files modified:**
+- `src/wallet/factory.ts` - Updated config interface and migrate() call
+
+**Application Updates** - NOT STARTED
+- [ ] yours-wallet: Generate and persist unique storageIdentityKey per device
+- [ ] sweep-ui: Generate and persist unique storageIdentityKey per device
 - `src/storage/StorageIdb.ts` - Added deviceId filter
 
 **PR 3: 1sat-wallet-toolbox (wrapper)** - ✅ COMPLETE (branch: `feat/device-id-sync-isolation`)

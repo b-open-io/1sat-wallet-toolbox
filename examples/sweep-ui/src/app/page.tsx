@@ -49,6 +49,17 @@ async function fetchBsvPrice(): Promise<number> {
   }
 }
 
+const STORAGE_IDENTITY_KEY = "sweep-ui-storage-identity-key";
+
+function getOrCreateStorageIdentityKey(): string {
+  let key = localStorage.getItem(STORAGE_IDENTITY_KEY);
+  if (!key) {
+    key = crypto.randomUUID();
+    localStorage.setItem(STORAGE_IDENTITY_KEY, key);
+  }
+  return key;
+}
+
 function formatUsd(sats: number, price: number): string {
   if (price === 0) return "";
   const bsv = sats / 100_000_000;
@@ -496,6 +507,7 @@ function useDestinationWallet(addLog: (msg: string) => void): DestinationWalletS
         privateKey: wif,
         chain: "main",
         adminOriginator: "https://sweep-ui.local",
+        storageIdentityKey: getOrCreateStorageIdentityKey(),
         permissionsConfig: {
           seekProtocolPermissionsForSigning: false,
           seekProtocolPermissionsForEncrypting: false,
