@@ -192,6 +192,16 @@ export async function createWebWallet(
       // Add remote storage to the existing storage manager using public API
       await storage.addWalletStorageProvider(remoteClient);
       console.log("[createWebWallet] Remote storage connected successfully");
+
+      // Pull changes from remote to sync with other devices
+      console.log("[createWebWallet] Syncing from remote...");
+      const syncResult = await storage.syncFromReader(
+        identityPubKey,
+        remoteClient,
+      );
+      console.log(
+        `[createWebWallet] Synced from remote: ${syncResult.inserts} inserts, ${syncResult.updates} updates`,
+      );
     } catch (err) {
       console.log(
         "[createWebWallet] Remote storage connection failed:",
