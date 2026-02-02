@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.60] - 2026-02-02
+
+### Changed
+
+- **BREAKING**: `WebWalletConfig.storageIdentityKey` is now required (renamed from optional `deviceId`)
+- Consuming applications must generate and persist a unique storageIdentityKey per device
+
+### Fixed
+
+- Sync corruption when multiple devices share the same wallet identity
+- Each device now gets isolated SyncState via unique storageIdentityKey
+
 ## [0.0.59] - 2026-02-01
 
 ### Changed
