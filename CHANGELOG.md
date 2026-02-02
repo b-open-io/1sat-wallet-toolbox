@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.68] - 2026-02-02
+
+### Fixed
+
+- **Multi-device sync order** - Changed to proper bidirectional sync (pull then push) on wallet startup. Previously, only pushing without pulling left idMap empty, causing "Result must be unique" errors during conflict resolution. Removed unnecessary conflict resolution logic entirely.
+
 ## [0.0.67] - 2026-02-02
 
 ### Fixed
