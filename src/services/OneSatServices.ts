@@ -218,6 +218,10 @@ export class OneSatServices implements WalletServices {
         // Submit as AtomicBEEF which includes all source transactions
         console.log("[OneSatServices] Submitting tx to arcade:", txid);
         const atomicBeef = beef.toBinaryAtomic(txid);
+        console.log("[OneSatServices] AtomicBEEF length:", atomicBeef.length, "bytes");
+        // Parse back to verify structure
+        const verifyBeef = Beef.fromBinary(atomicBeef);
+        console.log("[OneSatServices] AtomicBEEF parsed back:\n" + verifyBeef.toLogString());
         // TODO: Remove hardcoded callback headers after server testing
         const status = await this.arcade.submitTransaction(atomicBeef, {
           callbackUrl: `${this.baseUrl}/1sat/arc/callback`,
