@@ -10,10 +10,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@1sat/wallet-toolbox": "0.0.64",
+    "@1sat/wallet-toolbox": "0.0.73",
     "@bsv/sdk": "^1.10.2",
-    "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@1.7.22-idb-fix.3",
-    "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@1.7.22-idb-fix.3",
+    "@bsv/wallet-toolbox": "npm:@bopen-io/wallet-toolbox@1.7.24-idb-fix.1",
+    "@bsv/wallet-toolbox-mobile": "npm:@bopen-io/wallet-toolbox-mobile@1.7.24-idb-fix.1",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
