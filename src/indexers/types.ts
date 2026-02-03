@@ -7,9 +7,9 @@ import type { Outpoint } from "./Outpoint";
 export interface Bsv21TokenData {
   id: string;
   op: string;
-  amt: string; // Stored as string in overlay to avoid BSON type conversion issues
+  amt: string;
   sym?: string;
-  dec?: number;
+  dec?: string;
   icon?: string;
   address?: string;
 }
@@ -18,15 +18,13 @@ export interface Bsv21TokenData {
  * BSV21 output data from overlay API
  */
 export interface Bsv21OutputData {
-  txid: string;
+  txid?: string;
   vout: number;
   data: {
     bsv21: Bsv21TokenData;
   };
-  script: string;
-  satoshis: number;
-  spend: string | null;
-  score: number;
+  spend?: string | null;
+  score?: number;
 }
 
 /**
@@ -37,6 +35,7 @@ export interface Bsv21TransactionData {
   inputs: Bsv21OutputData[];
   outputs: Bsv21OutputData[];
   beef?: string;
+  block_height?: number;
 }
 
 /**

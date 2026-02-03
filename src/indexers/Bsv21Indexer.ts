@@ -83,9 +83,9 @@ export class Bsv21Indexer extends Indexer {
     if (!isDeploy) {
       try {
         const details = await this.services.bsv21.getTokenDetails(tokenId);
-        bsv21.sym = details.sym;
-        bsv21.icon = resolveIcon(details.icon, tokenId);
-        bsv21.dec = details.dec;
+        bsv21.sym = details.token.sym;
+        bsv21.icon = resolveIcon(details.token.icon, tokenId);
+        bsv21.dec = Number(details.token.dec) || 0;
       } catch (e) {
         // Token not found on server - could be unconfirmed or invalid
         // Keep local values from inscription, status remains pending

@@ -1,8 +1,8 @@
 import type {
-  Bsv21TokenDetails,
   Bsv21TransactionData,
   ClientOptions,
   IndexedOutput,
+  TokenDetailResponse,
 } from "../types";
 import { BaseClient } from "./BaseClient";
 
@@ -11,29 +11,45 @@ import { BaseClient } from "./BaseClient";
  * Provides BSV21 token queries.
  *
  * Routes:
- * - GET /:tokenId - Get token details
- * - GET /:tokenId/blk/:height - Get token data at block height
- * - GET /:tokenId/tx/:txid - Get token data for transaction
+ * - POST /lookup - Bulk lookup token details with funding status
+ * - GET /:tokenId - Get token details with funding status
+ * - GET /:tokenId/tx/:txid - Get token transaction data
  * - GET /:tokenId/:lockType/:address/balance - Get token balance
  * - GET /:tokenId/:lockType/:address/unspent - Get unspent token UTXOs
  * - GET /:tokenId/:lockType/:address/history - Get token transaction history
+ * - POST /:tokenId/:lockType/balance - Multi-address token balance
+ * - POST /:tokenId/:lockType/unspent - Multi-address unspent token UTXOs
+ * - POST /:tokenId/:lockType/history - Multi-address token transaction history
  */
 export class Bsv21Client extends BaseClient {
-  private cache = new Map<string, Bsv21TokenDetails>();
+  private cache = new Map<string, TokenDetailResponse>();
 
   constructor(baseUrl: string, options: ClientOptions = {}) {
     super(`${baseUrl}/1sat/bsv21`, options);
   }
 
   /**
-   * Get token details (deploy data).
-   * Results are cached since token details are immutable.
+   * Bulk lookup token details with funding status.
+   * Returns details and active status for multiple tokens in one request.
+   * @param tokenIds - Array of token IDs (max 100)
    */
-  async getTokenDetails(tokenId: string): Promise<Bsv21TokenDetails> {
+  async lookupTokens(tokenIds: string[]): Promise<TokenDetailResponse[]> {
+    return this.request<TokenDetailResponse[]>("/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(tokenIds),
+    });
+  }
+
+  /**
+   * Get token details with funding status.
+   * Results are cached since token deploy data is immutable.
+   */
+  async getTokenDetails(tokenId: string): Promise<TokenDetailResponse> {
     const cached = this.cache.get(tokenId);
     if (cached) return cached;
 
-    const details = await this.request<Bsv21TokenDetails>(`/${tokenId}`);
+    const details = await this.request<TokenDetailResponse>(`/${tokenId}`);
     this.cache.set(tokenId, details);
     return details;
   }
@@ -50,19 +66,15 @@ export class Bsv21Client extends BaseClient {
 
   /**
    * Get token balance for an address
-   * @param tokenId - Token ID (outpoint of deploy tx)
-   * @param lockType - Lock type (e.g., 'p2pkh', 'ordlock')
-   * @param address - Address to check
    */
   async getBalance(
     tokenId: string,
     lockType: string,
     address: string,
-  ): Promise<bigint> {
-    const data = await this.request<{ balance: string }>(
+  ): Promise<{ balance: number; utxoCount: number }> {
+    return this.request<{ balance: number; utxoCount: number }>(
       `/${tokenId}/${lockType}/${address}/balance`,
     );
-    return BigInt(data.balance);
   }
 
   /**
@@ -88,6 +100,63 @@ export class Bsv21Client extends BaseClient {
   ): Promise<IndexedOutput[]> {
     return this.request<IndexedOutput[]>(
       `/${tokenId}/${lockType}/${address}/history`,
+    );
+  }
+
+  /**
+   * Get token balance for multiple addresses
+   * @param addresses - Array of addresses (max 100)
+   */
+  async getBalanceMulti(
+    tokenId: string,
+    lockType: string,
+    addresses: string[],
+  ): Promise<{ balance: number; utxoCount: number }> {
+    return this.request<{ balance: number; utxoCount: number }>(
+      `/${tokenId}/${lockType}/balance`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addresses),
+      },
+    );
+  }
+
+  /**
+   * Get unspent token UTXOs for multiple addresses
+   * @param addresses - Array of addresses (max 100)
+   */
+  async getUnspentMulti(
+    tokenId: string,
+    lockType: string,
+    addresses: string[],
+  ): Promise<IndexedOutput[]> {
+    return this.request<IndexedOutput[]>(
+      `/${tokenId}/${lockType}/unspent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addresses),
+      },
+    );
+  }
+
+  /**
+   * Get token transaction history for multiple addresses
+   * @param addresses - Array of addresses (max 100)
+   */
+  async getHistoryMulti(
+    tokenId: string,
+    lockType: string,
+    addresses: string[],
+  ): Promise<IndexedOutput[]> {
+    return this.request<IndexedOutput[]>(
+      `/${tokenId}/${lockType}/history`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addresses),
+      },
     );
   }
 

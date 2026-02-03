@@ -267,20 +267,6 @@ export interface OrdfsContentResponse {
 // ============================================================================
 
 /**
- * BSV21 token details (deploy data)
- */
-export interface Bsv21TokenDetails {
-  id: string;
-  txid: string;
-  vout: number;
-  op: string;
-  amt: string;
-  sym?: string;
-  dec: number;
-  icon?: string;
-}
-
-/**
  * BSV21 token data structure from overlay API
  */
 export interface Bsv21TokenData {
@@ -288,24 +274,47 @@ export interface Bsv21TokenData {
   op: string;
   amt: string;
   sym?: string;
-  dec?: number;
+  dec?: string;
   icon?: string;
   address?: string;
+}
+
+/**
+ * BSV21 token detail response from GET /bsv21/:tokenId and POST /bsv21/lookup
+ */
+export interface TokenDetailResponse {
+  tokenId: string;
+  token: Bsv21TokenData;
+  status: TokenStatus;
+}
+
+/**
+ * BSV21 token funding/activity status
+ */
+export interface TokenStatus {
+  token_id: string;
+  is_active: boolean;
+  balance: number;
+  credits: number;
+  debits: number;
+  output_count: number;
+  fee_per_output: number;
+  fee_address: string;
+  is_whitelisted: boolean;
+  is_blacklisted: boolean;
 }
 
 /**
  * BSV21 output data from overlay API
  */
 export interface Bsv21OutputData {
-  txid: string;
+  txid?: string;
   vout: number;
   data: {
     bsv21: Bsv21TokenData;
   };
-  script: string;
-  satoshis: number;
-  spend: string | null;
-  score: number;
+  spend?: string | null;
+  score?: number;
 }
 
 /**
@@ -316,6 +325,7 @@ export interface Bsv21TransactionData {
   inputs: Bsv21OutputData[];
   outputs: Bsv21OutputData[];
   beef?: string;
+  block_height?: number;
 }
 
 // ============================================================================

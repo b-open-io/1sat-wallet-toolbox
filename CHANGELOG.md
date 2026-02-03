@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.74] - 2026-02-03
+
+### Changed
+
+- **Bsv21Client** - `getTokenDetails` now returns `TokenDetailResponse` (wraps token data with funding status). Added `lookupTokens()` for bulk token lookup via `POST /bsv21/lookup`. Added multi-address `getBalanceMulti`, `getUnspentMulti`, `getHistoryMulti` methods.
+- **BSV21 types** - `Bsv21OutputData` updated to match bsv21-overlay response (`vout`/`spend` instead of `outpoint`). `dec` and `amt` are now strings. Added `TokenDetailResponse` and `TokenStatus` types. Removed `Bsv21TokenDetails`.
+- **OverlayClient** - Removed BSV21-specific methods (`getActiveBsv21Tokens`, `getActiveBsv21TokenIds`). Use `Bsv21Client.lookupTokens()` instead.
+
+### Fixed
+
+- **BSV21 sweep validation** - Token outputs now validate correctly against the overlay. Previously all outputs showed "0 validated" due to mismatched response types.
+
 ## [0.0.71] - 2026-02-02
 
 ### Added

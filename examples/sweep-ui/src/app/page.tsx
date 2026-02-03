@@ -1952,71 +1952,72 @@ export default function SweepPage() {
       else groups.set(parsed.tokenId, [o]);
     }
 
-    // Fetch active tokens FIRST, then only show tokens that have overlay topics
     (async () => {
-      // Get active BSV-21 tokens with metadata from topic managers
-      let tokenMetadata: Map<string, { symbol?: string; icon?: string }>;
+      // Bulk lookup all token details and active status in one request
+      const tokenIds = [...groups.keys()];
+      let tokenDetails: Map<string, { symbol?: string; icon?: string; decimals: number; isActive: boolean }>;
       try {
-        const tokens = await services.overlay.getActiveBsv21Tokens();
-        tokenMetadata = new Map(tokens.map((t) => [t.tokenId, { symbol: t.symbol, icon: t.icon }]));
+        const results = await services.bsv21.lookupTokens(tokenIds);
+        tokenDetails = new Map();
+        for (const r of results) {
+          if (!r) continue;
+          tokenDetails.set(r.tokenId, {
+            symbol: r.token.sym,
+            icon: r.token.icon,
+            decimals: Number(r.token.dec) || 0,
+            isActive: r.status.is_active,
+          });
+        }
       } catch {
-        // If overlay query fails, we can't validate - show nothing
         if (!cancelled) setTokenBalances([]);
         return;
       }
 
-      // Filter to only tokens that exist in wallet AND have active topic managers
-      const activeTokenIds = [...groups.keys()].filter((tokenId) => tokenMetadata.has(tokenId));
+      // Filter to only tokens that are active on the overlay
+      const activeTokenIds = tokenIds.filter((id) => tokenDetails.get(id)?.isActive);
 
-      // If no active tokens, clear and return early
       if (activeTokenIds.length === 0) {
         if (!cancelled) setTokenBalances([]);
         return;
       }
 
-      // Build initial state for active tokens only (loading state)
+      // Build initial loading state
       const activeTokens: TokenBalance[] = activeTokenIds.map((tokenId) => {
         const outputs = groups.get(tokenId) ?? [];
-        const meta = tokenMetadata.get(tokenId);
+        const meta = tokenDetails.get(tokenId)!;
         return {
           tokenId,
-          symbol: meta?.symbol,
-          icon: meta?.icon,
-          decimals: 0,
+          symbol: meta.symbol,
+          icon: meta.icon,
+          decimals: meta.decimals,
           validatedAmount: 0n,
-          totalAmount: outputs.reduce((sum, o) => sum + (parseTokenFromEvents(o)?.amount ?? 0n), 0n),
+          totalAmount: 0n,
           validatedOutputs: [],
           allOutputs: outputs,
           loading: true,
         };
       });
 
-      // Set loading state for active tokens only
       if (!cancelled) setTokenBalances(activeTokens);
 
-      // Validate each output
+      // Validate each output against the overlay
       const results = await Promise.all(
         activeTokens.map(async (tb) => {
           const validated: IndexedOutput[] = [];
           let validatedAmount = 0n;
-          console.log(`[Validate] Token ${tb.symbol || tb.tokenId.slice(0, 8)}: ${tb.allOutputs.length} outputs to check`);
+
           for (const output of tb.allOutputs) {
             try {
               const [txid, voutStr] = output.outpoint.split("_");
               const vout = Number.parseInt(voutStr, 10);
-              console.log(`[Validate] Checking ${tb.tokenId} tx/${txid}`);
               const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
-              console.log(`[Validate] Got txData:`, txData);
               const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
               if (found) {
                 validated.push(output);
-                validatedAmount += parseTokenFromEvents(output)?.amount ?? 0n;
-                console.log(`[Validate] VALID: vout ${vout}`);
-              } else {
-                console.log(`[Validate] NOT VALID: vout ${vout} not found or spent`);
+                validatedAmount += BigInt(found.data.bsv21.amt);
               }
-            } catch (e) {
-              console.log(`[Validate] ERROR for ${output.outpoint}:`, e);
+            } catch {
+              // Output not found in overlay — skip
             }
           }
 

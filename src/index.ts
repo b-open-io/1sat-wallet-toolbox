@@ -16,6 +16,11 @@ export type {
   OrdfsContentResponse,
   OrdfsResponseHeaders,
   Capability,
+  TokenDetailResponse,
+  TokenStatus,
+  Bsv21TokenData,
+  Bsv21OutputData,
+  Bsv21TransactionData,
 } from "./services/types";
 export * from "./services/client";
 export { ReadOnlySigner } from "./signers/ReadOnlySigner";
