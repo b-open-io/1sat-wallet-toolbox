@@ -156,42 +156,6 @@ export const getExchangeRate: Skill<GetExchangeRateInput, number> = {
   },
 };
 
-/** Input for getChainInfo skill (no required params) */
-export type GetChainInfoInput = Record<string, never>;
-
-/** Output for getChainInfo skill */
-export interface ChainInfo {
-  blocks: number;
-}
-
-/**
- * Get chain info from WhatsOnChain.
- */
-export const getChainInfo: Skill<GetChainInfoInput, ChainInfo | null> = {
-  meta: {
-    name: "getChainInfo",
-    description: "Get current chain info (block height) from WhatsOnChain",
-    category: "balance",
-    inputSchema: {
-      type: "object",
-      properties: {},
-    },
-  },
-  async execute(ctx) {
-    const baseUrl = ctx.chain === "main" ? WOC_MAINNET_URL : WOC_TESTNET_URL;
-    const headers: Record<string, string> = {};
-    if (ctx.wocApiKey) headers["woc-api-key"] = ctx.wocApiKey;
-
-    try {
-      const response = await fetch(`${baseUrl}/chain/info`, { headers });
-      if (!response.ok) return null;
-      return await response.json();
-    } catch {
-      return null;
-    }
-  },
-};
-
 // ============================================================================
 // Module exports
 // ============================================================================
@@ -201,5 +165,4 @@ export const balanceSkills = [
   getBalance,
   getPaymentUtxos,
   getExchangeRate,
-  getChainInfo,
 ];

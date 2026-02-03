@@ -19,8 +19,6 @@ import {
   LOCK_PREFIX,
   LOCK_SUFFIX,
   MIN_UNLOCK_SATS,
-  WOC_MAINNET_URL,
-  WOC_TESTNET_URL,
 } from "../constants";
 import type { OneSatContext, Skill } from "../skills/types";
 
@@ -70,22 +68,7 @@ function buildLockScript(address: string, until: number): Script {
     .writeScript(Script.fromHex(LOCK_SUFFIX));
 }
 
-async function getChainInfoInternal(
-  chain: "main" | "test",
-  wocApiKey?: string,
-): Promise<{ blocks: number } | null> {
-  const baseUrl = chain === "main" ? WOC_MAINNET_URL : WOC_TESTNET_URL;
-  const headers: Record<string, string> = {};
-  if (wocApiKey) headers["woc-api-key"] = wocApiKey;
 
-  try {
-    const response = await fetch(`${baseUrl}/chain/info`, { headers });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
 
 // ============================================================================
 // Skills
@@ -111,8 +94,8 @@ export const getLockData: Skill<GetLockDataInput, LockData> = {
   async execute(ctx) {
     const lockData: LockData = { totalLocked: 0, unlockable: 0, nextUnlock: 0 };
 
-    const chainInfo = await getChainInfoInternal(ctx.chain, ctx.wocApiKey);
-    const currentHeight = chainInfo?.blocks || 0;
+    if (!ctx.services) return lockData;
+    const currentHeight = await ctx.services.chaintracks.currentHeight();
 
     const result = await ctx.wallet.listOutputs({
       basket: LOCK_BASKET,
@@ -254,11 +237,8 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
   },
   async execute(ctx) {
     try {
-      const chainInfo = await getChainInfoInternal(ctx.chain, ctx.wocApiKey);
-      const currentHeight = chainInfo?.blocks || 0;
-      if (currentHeight === 0) {
-        return { error: "could-not-get-block-height" };
-      }
+      if (!ctx.services) return { error: "services-required" };
+      const currentHeight = await ctx.services.chaintracks.currentHeight();
 
       const result = await ctx.wallet.listOutputs({
         basket: LOCK_BASKET,
