@@ -189,9 +189,35 @@ export async function createWebWallet(
       );
       await Promise.race([remoteClient.makeAvailable(), timeoutPromise]);
 
-      // Add remote as backup destination (push-only, no pull)
+      // Add remote to storage manager - it will partition as conflicting if another device is active
       await storage.addWalletStorageProvider(remoteClient);
-      console.log("[createWebWallet] Remote backup connected");
+
+      // Check if remote ended up in backup stores (active) or got partitioned (conflicting)
+      const remoteStorageKey = remoteClient.getSettings().storageIdentityKey;
+      const isActive = storage.getBackupStores().includes(remoteStorageKey);
+
+      if (isActive) {
+        console.log("[createWebWallet] Remote backup connected (we are active)");
+      } else {
+        // Another device is active - need fullSync then setActive
+        // fullSync builds ID mappings before setActive attempts to merge
+        console.log("[createWebWallet] Another device is active, performing full sync...");
+
+        await fullSync({
+          storage,
+          remoteStorage: remoteClient,
+          identityKey: identityPubKey,
+          onProgress: (stage, msg) => console.log(`[createWebWallet] fullSync ${stage}: ${msg}`),
+        });
+
+        // Claim active status (merge now works because mappings exist from fullSync)
+        await storage.setActive(config.storageIdentityKey, (msg) => {
+          console.log("[createWebWallet] setActive:", msg);
+          return msg;
+        });
+
+        console.log("[createWebWallet] Remote backup connected (now active after handoff)");
+      }
     } catch (err) {
       console.log(
         "[createWebWallet] Remote backup connection failed:",
