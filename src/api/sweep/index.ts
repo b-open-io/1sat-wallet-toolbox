@@ -13,14 +13,8 @@ import {
   Transaction,
   Utils,
 } from "@bsv/sdk";
-import { deriveFundAddress } from "../../indexers";
 import type { IndexedOutput } from "../../services/types";
-import {
-  BSV21_BASKET,
-  BSV21_FEE_SATS,
-  BSV21_PROTOCOL,
-  ONESAT_PROTOCOL,
-} from "../constants";
+import { BSV21_BASKET, BSV21_PROTOCOL, ONESAT_PROTOCOL } from "../constants";
 import type { OneSatContext, Skill } from "../skills/types";
 import type {
   SweepBsv21Request,
@@ -466,7 +460,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
           options: { signAndProcess: false, randomizeOutputs: false },
         };
 
-        console.log(`[sweepOrdinals] === CREATE ACTION ARGS ===`);
+        console.log("[sweepOrdinals] === CREATE ACTION ARGS ===");
         console.log(
           `[sweepOrdinals] description: ${createActionArgs.description}`,
         );
@@ -476,24 +470,24 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         console.log(`[sweepOrdinals] inputs count: ${inputDescriptors.length}`);
         console.log(`[sweepOrdinals] outputs count: ${outputs.length}`);
         console.log(
-          `[sweepOrdinals] inputs:`,
+          "[sweepOrdinals] inputs:",
           JSON.stringify(inputDescriptors, null, 2),
         );
         console.log(
-          `[sweepOrdinals] outputs:`,
+          "[sweepOrdinals] outputs:",
           JSON.stringify(outputs, null, 2),
         );
         console.log(
-          `[sweepOrdinals] options:`,
+          "[sweepOrdinals] options:",
           JSON.stringify(createActionArgs.options),
         );
-        console.log(`[sweepOrdinals] Calling createAction...`);
+        console.log("[sweepOrdinals] Calling createAction...");
 
-        let createResult;
+        let createResult: Awaited<ReturnType<typeof ctx.wallet.createAction>>;
         try {
           createResult = await ctx.wallet.createAction(createActionArgs);
           console.log(
-            `[sweepOrdinals] createAction returned:`,
+            "[sweepOrdinals] createAction returned:",
             JSON.stringify(
               createResult,
               (key, value) => {
@@ -508,14 +502,14 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
             ),
           );
         } catch (createError) {
-          console.error(`[sweepOrdinals] createAction threw:`, createError);
+          console.error("[sweepOrdinals] createAction threw:", createError);
           const errorMsg =
             createError instanceof Error
               ? createError.message
               : String(createError);
           const errorStack =
             createError instanceof Error ? createError.stack : undefined;
-          console.error(`[sweepOrdinals] Stack:`, errorStack);
+          console.error("[sweepOrdinals] Stack:", errorStack);
           return { error: `createAction failed: ${errorMsg}` };
         }
 
@@ -531,7 +525,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         const tx = Transaction.fromBEEF(createResult.signableTransaction.tx);
 
         // Log transaction structure for debugging
-        console.log(`[sweepOrdinals] === Transaction Structure ===`);
+        console.log("[sweepOrdinals] === Transaction Structure ===");
         console.log(`[sweepOrdinals] Inputs (${tx.inputs.length}):`);
         let totalInputSats = 0;
         for (let i = 0; i < tx.inputs.length; i++) {
@@ -559,7 +553,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         console.log(
           `[sweepOrdinals] Signable tx hex: ${Utils.toHex(createResult.signableTransaction.tx)}`,
         );
-        console.log(`[sweepOrdinals] ==============================`);
+        console.log("[sweepOrdinals] ==============================");
 
         // Build a set of outpoints we control
         const ourOutpoints = new Set(
@@ -588,13 +582,13 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
 
         // Log signed transaction details for debugging
         const localTxid = tx.id("hex");
-        console.log(`[sweepOrdinals] === LOCAL SIGNED TX ===`);
+        console.log("[sweepOrdinals] === LOCAL SIGNED TX ===");
         console.log(`[sweepOrdinals] Local txid: ${localTxid}`);
         console.log(`[sweepOrdinals] Signed tx hex: ${tx.toHex()}`);
 
         // Extract unlocking scripts for signAction
         const spends: Record<number, { unlockingScript: string }> = {};
-        console.log(`[sweepOrdinals] === UNLOCKING SCRIPTS FOR SIGNACTION ===`);
+        console.log("[sweepOrdinals] === UNLOCKING SCRIPTS FOR SIGNACTION ===");
         for (let i = 0; i < tx.inputs.length; i++) {
           const txInput = tx.inputs[i];
           const inputOutpoint = `${txInput.sourceTXID}.${txInput.sourceOutputIndex}`;
@@ -620,12 +614,12 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         }
 
         // Debug: compare local vs signAction result
-        console.log(`[sweepOrdinals] === SIGN ACTION RESULT ===`);
+        console.log("[sweepOrdinals] === SIGN ACTION RESULT ===");
         console.log(`[sweepOrdinals] signAction txid: ${signResult.txid}`);
         // Log broadcast results if available
         if ("sendWithResults" in signResult) {
           console.log(
-            `[sweepOrdinals] sendWithResults:`,
+            "[sweepOrdinals] sendWithResults:",
             JSON.stringify(
               (signResult as { sendWithResults?: unknown }).sendWithResults,
             ),
@@ -633,13 +627,13 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
         }
         console.log(`[sweepOrdinals] Local txid (partial): ${localTxid}`);
         console.log(
-          `[sweepOrdinals] Note: TXIDs differ because local is partial (wallet input unsigned)`,
+          "[sweepOrdinals] Note: TXIDs differ because local is partial (wallet input unsigned)",
         );
 
         if (signResult.tx) {
           // Parse returned BEEF to show final transaction structure
           const returnedTx = Transaction.fromBEEF(signResult.tx);
-          console.log(`[sweepOrdinals] === FINAL TX STRUCTURE (broadcast) ===`);
+          console.log("[sweepOrdinals] === FINAL TX STRUCTURE (broadcast) ===");
           console.log(
             `[sweepOrdinals] Final inputs (${returnedTx.inputs.length}):`,
           );
@@ -684,7 +678,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
             `[sweepOrdinals] Tx size: ${txSize} bytes, Fee rate: ${satPerByte.toFixed(2)} sat/byte`,
           );
           if (satPerByte < 0.5) {
-            console.warn(`[sweepOrdinals] WARNING: Fee rate seems very low!`);
+            console.warn("[sweepOrdinals] WARNING: Fee rate seems very low!");
           }
         }
 
@@ -773,6 +767,13 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         return { error: "mixed-token-ids" };
       }
 
+      // Lookup token details to verify it's active and get fee info
+      const tokenDetails = await ctx.services.bsv21.getTokenDetails(tokenId);
+      if (!tokenDetails.status.is_active) {
+        return { error: "token-not-active" };
+      }
+      const { fee_address, fee_per_output } = tokenDetails.status;
+
       // Parse WIF
       const privateKey = PrivateKey.fromWif(wif);
 
@@ -845,11 +846,10 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         }),
       });
 
-      // 2. Fee output (1000 sats) to overlay fund address
-      const fundAddress = deriveFundAddress(tokenId);
+      // 2. Fee output to overlay fund address
       outputs.push({
-        lockingScript: p2pkh.lock(fundAddress).toHex(),
-        satoshis: BSV21_FEE_SATS,
+        lockingScript: p2pkh.lock(fee_address).toHex(),
+        satoshis: fee_per_output,
         outputDescription: "Overlay processing fee",
         tags: [],
       });
@@ -927,16 +927,14 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
       // Submit to overlay service for indexing
       if (signResult.tx) {
         try {
-          const services =
-            ctx.services as import("../../services/OneSatServices").OneSatServices;
-          const overlayResult = await services.overlay.submitBsv21(
+          const overlayResult = await ctx.services.overlay.submitBsv21(
             signResult.tx,
             tokenId,
           );
-          console.log(`[sweepBsv21] Overlay submission result:`, overlayResult);
+          console.log("[sweepBsv21] Overlay submission result:", overlayResult);
         } catch (overlayError) {
           // Log but don't fail the sweep - tx is already broadcast
-          console.warn(`[sweepBsv21] Overlay submission failed:`, overlayError);
+          console.warn("[sweepBsv21] Overlay submission failed:", overlayError);
         }
       }
 

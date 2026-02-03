@@ -87,8 +87,8 @@ export class SyncFetcher {
       this.listeners.set(event, new Set());
     }
     this.listeners
-      .get(event)!
-      .add(listener as SyncFetcherEventListener<keyof SyncFetcherEvents>);
+      .get(event)
+      ?.add(listener as SyncFetcherEventListener<keyof SyncFetcherEvents>);
   }
 
   off<K extends keyof SyncFetcherEvents>(
@@ -104,7 +104,9 @@ export class SyncFetcher {
     event: K,
     data: SyncFetcherEvents[K],
   ): void {
-    this.listeners.get(event)?.forEach((listener) => listener(data));
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(data);
+    }
   }
 
   /**
@@ -209,9 +211,9 @@ export interface SyncProcessorOptions {
 }
 
 export interface SyncProcessorEvents {
-  "process:start": {};
+  "process:start": Record<string, never>;
   "process:progress": { pending: number; done: number; failed: number };
-  "process:complete": {};
+  "process:complete": Record<string, never>;
   "process:error": { message: string };
   "process:parsed": { internalizedCount: number };
 }
@@ -273,8 +275,8 @@ export class SyncProcessor {
       this.listeners.set(event, new Set());
     }
     this.listeners
-      .get(event)!
-      .add(listener as SyncProcessorEventListener<keyof SyncProcessorEvents>);
+      .get(event)
+      ?.add(listener as SyncProcessorEventListener<keyof SyncProcessorEvents>);
   }
 
   off<K extends keyof SyncProcessorEvents>(
@@ -292,7 +294,9 @@ export class SyncProcessor {
     event: K,
     data: SyncProcessorEvents[K],
   ): void {
-    this.listeners.get(event)?.forEach((listener) => listener(data));
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(data);
+    }
   }
 
   /**
@@ -551,18 +555,17 @@ export class SyncProcessor {
           }),
         },
       };
-    } else {
-      // P2PKH-based output - use wallet payment for auto-signing
-      return {
-        outputIndex: vout,
-        protocol: "wallet payment",
-        paymentRemittance: {
-          derivationPrefix: derivation.derivationPrefix,
-          derivationSuffix: derivation.derivationSuffix,
-          senderIdentityKey: derivation.senderIdentityKey,
-        },
-      };
     }
+    // P2PKH-based output - use wallet payment for auto-signing
+    return {
+      outputIndex: vout,
+      protocol: "wallet payment",
+      paymentRemittance: {
+        derivationPrefix: derivation.derivationPrefix,
+        derivationSuffix: derivation.derivationSuffix,
+        senderIdentityKey: derivation.senderIdentityKey,
+      },
+    };
   }
 
   private collectTags(txo: Txo): string[] {
@@ -596,7 +599,7 @@ export interface SyncManagerOptions {
 export interface SyncEvents {
   "sync:start": { addresses: string[] };
   "sync:progress": { pending: number; done: number; failed: number };
-  "sync:complete": {};
+  "sync:complete": Record<string, never>;
   "sync:error": { message: string };
   "sync:parsed": { internalizedCount: number };
 }
@@ -685,8 +688,8 @@ export class SyncManager {
       this.listeners.set(event, new Set());
     }
     this.listeners
-      .get(event)!
-      .add(listener as SyncEventListener<keyof SyncEvents>);
+      .get(event)
+      ?.add(listener as SyncEventListener<keyof SyncEvents>);
   }
 
   off<K extends keyof SyncEvents>(
@@ -702,7 +705,9 @@ export class SyncManager {
     event: K,
     data: SyncEvents[K],
   ): void {
-    this.listeners.get(event)?.forEach((listener) => listener(data));
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(data);
+    }
   }
 
   // ===== Sync Control =====

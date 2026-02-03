@@ -68,8 +68,6 @@ function buildLockScript(address: string, until: number): Script {
     .writeScript(Script.fromHex(LOCK_SUFFIX));
 }
 
-
-
 // ============================================================================
 // Skills
 // ============================================================================
@@ -322,10 +320,13 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
       for (let i = 0; i < maturedLocks.length; i++) {
         const lock = maturedLocks[i];
         const input = tx.inputs[i];
-        const lockingScript = Script.fromHex(lock.output.lockingScript!);
+        if (!lock.output.lockingScript || !input.sourceTXID) {
+          return { error: "missing-lock-data" };
+        }
+        const lockingScript = Script.fromHex(lock.output.lockingScript);
 
         const preimage = TransactionSignature.format({
-          sourceTXID: input.sourceTXID!,
+          sourceTXID: input.sourceTXID,
           sourceOutputIndex: input.sourceOutputIndex,
           sourceSatoshis: lock.output.satoshis,
           transactionVersion: tx.version,

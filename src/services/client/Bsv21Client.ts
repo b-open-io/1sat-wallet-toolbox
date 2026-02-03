@@ -131,14 +131,11 @@ export class Bsv21Client extends BaseClient {
     lockType: string,
     addresses: string[],
   ): Promise<IndexedOutput[]> {
-    return this.request<IndexedOutput[]>(
-      `/${tokenId}/${lockType}/unspent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(addresses),
-      },
-    );
+    return this.request<IndexedOutput[]>(`/${tokenId}/${lockType}/unspent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(addresses),
+    });
   }
 
   /**
@@ -150,14 +147,11 @@ export class Bsv21Client extends BaseClient {
     lockType: string,
     addresses: string[],
   ): Promise<IndexedOutput[]> {
-    return this.request<IndexedOutput[]>(
-      `/${tokenId}/${lockType}/history`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(addresses),
-      },
-    );
+    return this.request<IndexedOutput[]>(`/${tokenId}/${lockType}/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(addresses),
+    });
   }
 
   /**

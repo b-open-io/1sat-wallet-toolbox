@@ -161,8 +161,4 @@ export const getExchangeRate: Skill<GetExchangeRateInput, number> = {
 // ============================================================================
 
 /** All balance skills for registry */
-export const balanceSkills = [
-  getBalance,
-  getPaymentUtxos,
-  getExchangeRate,
-];
+export const balanceSkills = [getBalance, getPaymentUtxos, getExchangeRate];

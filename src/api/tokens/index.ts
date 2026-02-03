@@ -407,8 +407,10 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         recipientAddress = PublicKey.fromString(publicKey).toAddress();
       } else if (paymail) {
         return { error: "paymail-not-yet-implemented" };
+      } else if (address) {
+        recipientAddress = address;
       } else {
-        recipientAddress = address!;
+        return { error: "must-provide-counterparty-or-address" };
       }
 
       const outputs: Array<{
@@ -502,15 +504,13 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       // Submit to overlay service for indexing
       if (signResult.tx && ctx.services) {
         try {
-          const services =
-            ctx.services as import("../../services/OneSatServices").OneSatServices;
-          const overlayResult = await services.overlay.submitBsv21(
+          const overlayResult = await ctx.services.overlay.submitBsv21(
             signResult.tx,
             tokenId,
           );
-          console.log(`[sendBsv21] Overlay submission result:`, overlayResult);
+          console.log("[sendBsv21] Overlay submission result:", overlayResult);
         } catch (overlayError) {
-          console.warn(`[sendBsv21] Overlay submission failed:`, overlayError);
+          console.warn("[sendBsv21] Overlay submission failed:", overlayError);
         }
       }
 
@@ -713,19 +713,17 @@ export const purchaseBsv21: Skill<
       // Submit to overlay service for indexing
       if (signResult.tx && ctx.services) {
         try {
-          const services =
-            ctx.services as import("../../services/OneSatServices").OneSatServices;
-          const overlayResult = await services.overlay.submitBsv21(
+          const overlayResult = await ctx.services.overlay.submitBsv21(
             signResult.tx,
             tokenId,
           );
           console.log(
-            `[purchaseBsv21] Overlay submission result:`,
+            "[purchaseBsv21] Overlay submission result:",
             overlayResult,
           );
         } catch (overlayError) {
           console.warn(
-            `[purchaseBsv21] Overlay submission failed:`,
+            "[purchaseBsv21] Overlay submission failed:",
             overlayError,
           );
         }

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.75] - 2026-02-03
+
+### Changed
+
+- **sweepBsv21** - Now looks up token details at sweep time to verify the token is active and get `fee_address`/`fee_per_output` from the indexer instead of deriving locally.
+- **tokens** - Removed unnecessary `OneSatServices` casts in overlay submission.
+
+### Fixed
+
+- Resolved all biome lint errors across the codebase (non-null assertions, forEach, banned types, template literals, formatting).
+
 ## [0.0.74] - 2026-02-03
 
 ### Changed

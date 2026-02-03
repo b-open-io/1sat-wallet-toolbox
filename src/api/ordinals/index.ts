@@ -311,8 +311,10 @@ export async function buildTransferOrdinals(
         forSelf: false,
       });
       recipientAddress = PublicKey.fromString(publicKey).toAddress();
+    } else if (address) {
+      recipientAddress = address;
     } else {
-      recipientAddress = address!;
+      return { error: "must-provide-counterparty-or-address" };
     }
 
     // Preserve important tags from source output
@@ -329,7 +331,7 @@ export async function buildTransferOrdinals(
 
     const sourceName = extractName(ordinal.customInstructions);
 
-    inputs!.push({
+    inputs?.push({
       outpoint,
       inputDescription: "Ordinal to transfer",
       unlockingScriptLength: 108,
@@ -338,7 +340,7 @@ export async function buildTransferOrdinals(
     // Only track output in wallet when transferring to a counterparty (wallet can derive keys to spend it)
     // External address transfers are NOT tracked since the wallet cannot spend them
     if (counterparty) {
-      outputs!.push({
+      outputs?.push({
         lockingScript: new P2PKH().lock(recipientAddress).toHex(),
         satoshis: 1,
         outputDescription: "Ordinal transfer",
@@ -352,7 +354,7 @@ export async function buildTransferOrdinals(
       });
     } else {
       // External address - output is not tracked in wallet
-      outputs!.push({
+      outputs?.push({
         lockingScript: new P2PKH().lock(recipientAddress).toHex(),
         satoshis: 1,
         outputDescription: "Ordinal transfer to external address",
@@ -581,7 +583,7 @@ export const transferOrdinals: Skill<
             inputs: params.inputs,
             outputs: params.outputs?.map((o) => ({
               ...o,
-              lockingScript: o.lockingScript?.slice(0, 20) + "...",
+              lockingScript: `${o.lockingScript?.slice(0, 20)}...`,
             })),
           },
           null,

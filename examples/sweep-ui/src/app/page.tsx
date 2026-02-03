@@ -178,8 +178,8 @@ interface TokenBalance {
   icon?: string;
   decimals: number;
   validatedAmount: bigint;
-  totalAmount: bigint;
   validatedOutputs: IndexedOutput[];
+  validatedAmounts: Map<string, bigint>;
   allOutputs: IndexedOutput[];
   loading: boolean;
 }
@@ -969,9 +969,9 @@ function TokensSection({
                   ) : (
                     <>
                       {formatTokenAmount(tb.validatedAmount, tb.decimals)} validated
-                      {tb.validatedAmount !== tb.totalAmount && (
+                      {tb.allOutputs.length > tb.validatedOutputs.length && (
                         <span className="text-chart-4/60 ml-1">
-                          / {formatTokenAmount(tb.totalAmount, tb.decimals)} total
+                          ({tb.allOutputs.length - tb.validatedOutputs.length} unvalidated)
                         </span>
                       )}
                     </>
@@ -1991,8 +1991,8 @@ export default function SweepPage() {
           icon: meta.icon,
           decimals: meta.decimals,
           validatedAmount: 0n,
-          totalAmount: 0n,
           validatedOutputs: [],
+          validatedAmounts: new Map(),
           allOutputs: outputs,
           loading: true,
         };
@@ -2004,6 +2004,7 @@ export default function SweepPage() {
       const results = await Promise.all(
         activeTokens.map(async (tb) => {
           const validated: IndexedOutput[] = [];
+          const amounts = new Map<string, bigint>();
           let validatedAmount = 0n;
 
           for (const output of tb.allOutputs) {
@@ -2013,8 +2014,10 @@ export default function SweepPage() {
               const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
               const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
               if (found) {
+                const amt = BigInt(found.data.bsv21.amt);
                 validated.push(output);
-                validatedAmount += BigInt(found.data.bsv21.amt);
+                amounts.set(output.outpoint, amt);
+                validatedAmount += amt;
               }
             } catch {
               // Output not found in overlay — skip
@@ -2024,6 +2027,7 @@ export default function SweepPage() {
           return {
             ...tb,
             validatedOutputs: validated,
+            validatedAmounts: amounts,
             validatedAmount,
             loading: false,
           };
@@ -2203,18 +2207,14 @@ export default function SweepPage() {
         const sweepInputs = await prepareSweepInputs(ctx, tb.validatedOutputs);
         addLog(`Prepared ${sweepInputs.length} inputs`);
 
-        // Build token inputs with amount data
         const scripts = new Map(sweepInputs.map((s) => [s.outpoint, s.lockingScript]));
-        const tokenInputs: SweepBsv21Input[] = tb.validatedOutputs.map((output) => {
-          const parsed = parseTokenFromEvents(output);
-          return {
-            outpoint: output.outpoint,
-            satoshis: output.satoshis ?? 1,
-            lockingScript: scripts.get(output.outpoint) ?? "",
-            tokenId: tb.tokenId,
-            amount: (parsed?.amount ?? 0n).toString(),
-          };
-        });
+        const tokenInputs: SweepBsv21Input[] = tb.validatedOutputs.map((output) => ({
+          outpoint: output.outpoint,
+          satoshis: output.satoshis ?? 1,
+          lockingScript: scripts.get(output.outpoint) ?? "",
+          tokenId: tb.tokenId,
+          amount: (tb.validatedAmounts.get(output.outpoint) ?? 0n).toString(),
+        }));
 
         const result = await sweepBsv21.execute(ctx, {
           inputs: tokenInputs,

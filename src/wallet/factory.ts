@@ -157,7 +157,7 @@ export async function createWebWallet(
   await localStorage.migrate(DEFAULT_DATABASE_NAME, config.storageIdentityKey);
 
   // 4. Create storage manager with local-only storage initially (empty backups)
-  let storage = new WalletStorageManager(identityPubKey, localStorage, []);
+  const storage = new WalletStorageManager(identityPubKey, localStorage, []);
   await storage.makeAvailable();
 
   // 5. Create the underlying Wallet FIRST (needed for StorageClient signing)
@@ -197,17 +197,22 @@ export async function createWebWallet(
       const isActive = storage.getBackupStores().includes(remoteStorageKey);
 
       if (isActive) {
-        console.log("[createWebWallet] Remote backup connected (we are active)");
+        console.log(
+          "[createWebWallet] Remote backup connected (we are active)",
+        );
       } else {
         // Another device is active - need fullSync then setActive
         // fullSync builds ID mappings before setActive attempts to merge
-        console.log("[createWebWallet] Another device is active, performing full sync...");
+        console.log(
+          "[createWebWallet] Another device is active, performing full sync...",
+        );
 
         await fullSync({
           storage,
           remoteStorage: remoteClient,
           identityKey: identityPubKey,
-          onProgress: (stage, msg) => console.log(`[createWebWallet] fullSync ${stage}: ${msg}`),
+          onProgress: (stage, msg) =>
+            console.log(`[createWebWallet] fullSync ${stage}: ${msg}`),
         });
 
         // Claim active status (merge now works because mappings exist from fullSync)
@@ -216,7 +221,9 @@ export async function createWebWallet(
           return msg;
         });
 
-        console.log("[createWebWallet] Remote backup connected (now active after handoff)");
+        console.log(
+          "[createWebWallet] Remote backup connected (now active after handoff)",
+        );
       }
     } catch (err) {
       console.log(
@@ -242,25 +249,39 @@ export async function createWebWallet(
   // bypass the monitor's onTransactionBroadcasted callback. We detect broadcasts
   // by checking for txid in the result and sync to backup immediately.
   if (remoteClient) {
-    const originalCreateAction = underlyingWallet.createAction.bind(underlyingWallet);
+    const originalCreateAction =
+      underlyingWallet.createAction.bind(underlyingWallet);
     underlyingWallet.createAction = async (args) => {
       const result = await originalCreateAction(args);
       if (result.txid) {
-        console.log("[createWebWallet] Broadcast detected in createAction:", result.txid);
+        console.log(
+          "[createWebWallet] Broadcast detected in createAction:",
+          result.txid,
+        );
         syncToBackup("Backup after createAction").catch((err) => {
-          console.warn("[createWebWallet] Failed to sync after createAction:", err);
+          console.warn(
+            "[createWebWallet] Failed to sync after createAction:",
+            err,
+          );
         });
       }
       return result;
     };
 
-    const originalSignAction = underlyingWallet.signAction.bind(underlyingWallet);
+    const originalSignAction =
+      underlyingWallet.signAction.bind(underlyingWallet);
     underlyingWallet.signAction = async (args) => {
       const result = await originalSignAction(args);
       if (result.txid) {
-        console.log("[createWebWallet] Broadcast detected in signAction:", result.txid);
+        console.log(
+          "[createWebWallet] Broadcast detected in signAction:",
+          result.txid,
+        );
         syncToBackup("Backup after signAction").catch((err) => {
-          console.warn("[createWebWallet] Failed to sync after signAction:", err);
+          console.warn(
+            "[createWebWallet] Failed to sync after signAction:",
+            err,
+          );
         });
       }
       return result;
@@ -289,7 +310,7 @@ export async function createWebWallet(
   monitor.addDefaultTasks();
   console.log(
     "[createWebWallet] Monitor created with tasks:",
-    monitor["_tasks"].map((t: { name: string }) => t.name),
+    monitor._tasks.map((t: { name: string }) => t.name),
   );
 
   // 11. Wire up monitor callbacks - sync to remote first, then call user callbacks
@@ -303,9 +324,14 @@ export async function createWebWallet(
     if (remoteClient) {
       try {
         await syncToBackup("Backup after monitor broadcast");
-        console.log("[createWebWallet] Synced to backup after monitor broadcast");
+        console.log(
+          "[createWebWallet] Synced to backup after monitor broadcast",
+        );
       } catch (err) {
-        console.warn("[createWebWallet] Failed to sync after monitor broadcast:", err);
+        console.warn(
+          "[createWebWallet] Failed to sync after monitor broadcast:",
+          err,
+        );
       }
     }
 
@@ -314,7 +340,10 @@ export async function createWebWallet(
       try {
         config.onTransactionBroadcasted(result.txid);
       } catch (err) {
-        console.warn("[createWebWallet] User callback error after broadcast:", err);
+        console.warn(
+          "[createWebWallet] User callback error after broadcast:",
+          err,
+        );
       }
     }
   };
@@ -333,7 +362,10 @@ export async function createWebWallet(
         await syncToBackup("Backup after confirmation");
         console.log("[createWebWallet] Synced to backup after confirmation");
       } catch (err) {
-        console.warn("[createWebWallet] Failed to sync after confirmation:", err);
+        console.warn(
+          "[createWebWallet] Failed to sync after confirmation:",
+          err,
+        );
       }
     }
 
@@ -342,7 +374,10 @@ export async function createWebWallet(
       try {
         config.onTransactionProven(status.txid, status.blockHeight);
       } catch (err) {
-        console.warn("[createWebWallet] User callback error after proven:", err);
+        console.warn(
+          "[createWebWallet] User callback error after proven:",
+          err,
+        );
       }
     }
   };

@@ -210,7 +210,7 @@ export class OneSatServices implements WalletServices {
 
   async postBeef(beef: Beef, txids: string[]): Promise<PostBeefResult[]> {
     console.log("[OneSatServices] postBeef called with txids:", txids);
-    console.log("[OneSatServices] BEEF structure:\n" + beef.toLogString());
+    console.log(`[OneSatServices] BEEF structure:\n${beef.toLogString()}`);
     const results: PostBeefResult[] = [];
 
     for (const txid of txids) {
@@ -218,10 +218,16 @@ export class OneSatServices implements WalletServices {
         // Submit as AtomicBEEF which includes all source transactions
         console.log("[OneSatServices] Submitting tx to arcade:", txid);
         const atomicBeef = beef.toBinaryAtomic(txid);
-        console.log("[OneSatServices] AtomicBEEF length:", atomicBeef.length, "bytes");
+        console.log(
+          "[OneSatServices] AtomicBEEF length:",
+          atomicBeef.length,
+          "bytes",
+        );
         // Parse back to verify structure
         const verifyBeef = Beef.fromBinary(atomicBeef);
-        console.log("[OneSatServices] AtomicBEEF parsed back:\n" + verifyBeef.toLogString());
+        console.log(
+          `[OneSatServices] AtomicBEEF parsed back:\n${verifyBeef.toLogString()}`,
+        );
         // TODO: Remove hardcoded callback headers after server testing
         const status = await this.arcade.submitTransaction(atomicBeef, {
           callbackUrl: `${this.baseUrl}/1sat/arc/callback`,
@@ -390,10 +396,9 @@ export class OneSatServices implements WalletServices {
         const currentHeight = await this.getHeight();
         const depth = currentHeight - tx.merklePath.blockHeight + 1;
         return { txid, status: "mined", depth };
-      } else {
-        // No merkle path = known but not yet mined
-        return { txid, status: "known", depth: 0 };
       }
+      // No merkle path = known but not yet mined
+      return { txid, status: "known", depth: 0 };
     } catch {
       // 404 or error from Beef = unknown
       return { txid, status: "unknown", depth: undefined };
