@@ -9,13 +9,11 @@ import { KeyDeriver, PrivateKey, type WalletInterface } from "@bsv/sdk";
 import type { sdk as toolboxSdk } from "@bsv/wallet-toolbox";
 import {
   Monitor,
-  type PermissionsManagerConfig,
   Services,
   StorageClient,
   StorageIdb,
   StorageProvider,
   Wallet,
-  WalletPermissionsManager,
   WalletStorageManager,
   type sdk as mobileToolboxSdk,
 } from "@bsv/wallet-toolbox-mobile/out/src/index.client.js";
@@ -43,10 +41,6 @@ export interface WebWalletConfig {
   privateKey: PrivateKey | string;
   /** Network: 'main' or 'test' */
   chain: Chain;
-  /** Admin originator that bypasses permission checks (e.g., chrome-extension://id or https://wallet.example.com) */
-  adminOriginator: string;
-  /** Permission configuration for WalletPermissionsManager */
-  permissionsConfig: PermissionsManagerConfig;
   /** Fee model. Default: { model: 'sat/kb', value: 100 } */
   feeModel?: { model: "sat/kb"; value: number };
   /** Remote storage URL. If provided, attempts to connect for cloud backup. */
@@ -63,10 +57,8 @@ export interface WebWalletConfig {
  * Result of wallet creation.
  */
 export interface WebWalletResult {
-  /** Wallet instance with permission management */
-  wallet: WalletPermissionsManager;
-  /** Underlying wallet without permission checks (for trusted contexts like sweep-ui) */
-  rawWallet: Wallet;
+  /** Wallet instance */
+  wallet: Wallet;
   /** 1Sat services for API access */
   services: OneSatServices;
   /** Monitor for transaction lifecycle (not started - call monitor.startTasks() when ready) */
@@ -113,15 +105,14 @@ function parsePrivateKey(input: PrivateKey | string): PrivateKey {
 }
 
 /**
- * Create a web wallet with storage, services, permissions, and monitor.
+ * Create a web wallet with storage, services, and monitor.
  *
  * @example
  * ```typescript
  * const { wallet, services, monitor, destroy } = await createWebWallet({
  *   privateKey: identityWif,
  *   chain: 'main',
- *   adminOriginator: 'https://wallet.example.com',
- *   permissionsConfig: DEFAULT_PERMISSIONS_CONFIG,
+ *   storageIdentityKey: 'device-unique-id',
  * });
  *
  * // Wire up monitor callbacks
@@ -134,7 +125,7 @@ function parsePrivateKey(input: PrivateKey | string): PrivateKey {
 export async function createWebWallet(
   config: WebWalletConfig,
 ): Promise<WebWalletResult> {
-  const { chain, adminOriginator, permissionsConfig } = config;
+  const { chain } = config;
   const feeModel = config.feeModel ?? DEFAULT_FEE_MODEL;
 
   // 1. Parse private key and create KeyDeriver
@@ -160,8 +151,8 @@ export async function createWebWallet(
   const storage = new WalletStorageManager(identityPubKey, localStorage, []);
   await storage.makeAvailable();
 
-  // 5. Create the underlying Wallet FIRST (needed for StorageClient signing)
-  const underlyingWallet = new Wallet({
+  // 5. Create wallet (needed before StorageClient for signing)
+  const wallet = new Wallet({
     chain,
     keyDeriver,
     storage,
@@ -178,7 +169,7 @@ export async function createWebWallet(
     );
     try {
       remoteClient = new StorageClient(
-        underlyingWallet as unknown as WalletInterface,
+        wallet as unknown as WalletInterface,
         config.remoteStorageUrl,
       );
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -249,9 +240,8 @@ export async function createWebWallet(
   // bypass the monitor's onTransactionBroadcasted callback. We detect broadcasts
   // by checking for txid in the result and sync to backup immediately.
   if (remoteClient) {
-    const originalCreateAction =
-      underlyingWallet.createAction.bind(underlyingWallet);
-    underlyingWallet.createAction = async (args) => {
+    const originalCreateAction = wallet.createAction.bind(wallet);
+    wallet.createAction = async (args) => {
       const result = await originalCreateAction(args);
       if (result.txid) {
         console.log(
@@ -268,9 +258,8 @@ export async function createWebWallet(
       return result;
     };
 
-    const originalSignAction =
-      underlyingWallet.signAction.bind(underlyingWallet);
-    underlyingWallet.signAction = async (args) => {
+    const originalSignAction = wallet.signAction.bind(wallet);
+    wallet.signAction = async (args) => {
       const result = await originalSignAction(args);
       if (result.txid) {
         console.log(
@@ -288,14 +277,7 @@ export async function createWebWallet(
     };
   }
 
-  // 9. Wrap with permissions manager
-  const wallet = new WalletPermissionsManager(
-    underlyingWallet,
-    adminOriginator,
-    permissionsConfig,
-  );
-
-  // 10. Create monitor (not started - consumer calls startTasks() when ready)
+  // 9. Create monitor (not started - consumer calls startTasks() when ready)
   const monitor = new Monitor({
     chain,
     services: oneSatServices as unknown as typeof fallbackServices,
@@ -386,7 +368,7 @@ export async function createWebWallet(
   const destroy = async (): Promise<void> => {
     monitor.stopTasks();
     await monitor.destroy();
-    await underlyingWallet.destroy();
+    await wallet.destroy();
   };
 
   // 13. Create fullSync function if remote storage is connected
@@ -405,7 +387,6 @@ export async function createWebWallet(
 
   return {
     wallet,
-    rawWallet: underlyingWallet,
     services: oneSatServices,
     monitor,
     destroy,

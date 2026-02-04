@@ -178,33 +178,23 @@ export function DebugPanel({
     try {
       log("[DEBUG] Inspecting WalletStorageManager state...");
 
-      // Access storage through rawWallet using public APIs
-      const rawWallet = targetWallet.rawWallet as unknown as {
-        _storage?: {
-          getActiveStore?: () => string;
-          getBackupStores?: () => string[];
-          getConflictingStores?: () => string[];
-          getStores?: () => Array<{
-            isActive: boolean;
-            isEnabled: boolean;
-            isBackup: boolean;
-            isConflicting: boolean;
-            storageIdentityKey: string;
-            storageName: string;
-          }>;
-          isActiveEnabled?: boolean;
-          getAuth?: () => Promise<{ userId: number; identityKey: string }>;
-          runAsStorageProvider?: (fn: (sp: unknown) => Promise<void>) => Promise<void>;
-        };
+      const storage = targetWallet.storage as unknown as {
+        getActiveStore?: () => string;
+        getBackupStores?: () => string[];
+        getConflictingStores?: () => string[];
+        getStores?: () => Array<{
+          isActive: boolean;
+          isEnabled: boolean;
+          isBackup: boolean;
+          isConflicting: boolean;
+          storageIdentityKey: string;
+          storageName: string;
+        }>;
+        isActiveEnabled?: boolean;
+        getAuth?: () => Promise<{ userId: number; identityKey: string }>;
+        runAsStorageProvider?: (fn: (sp: unknown) => Promise<void>) => Promise<void>;
       };
 
-      const storage = rawWallet._storage;
-      if (!storage) {
-        log("[DEBUG] No storage found on wallet");
-        return;
-      }
-
-      // Use public APIs
       const activeStore = storage.getActiveStore?.() || "none";
       const backupStores = storage.getBackupStores?.() || [];
       const conflictingStores = storage.getConflictingStores?.() || [];
@@ -216,7 +206,6 @@ export function DebugPanel({
       log(`[DEBUG] isActiveEnabled: ${storage.isActiveEnabled}`);
       log(`[DEBUG] All stores: ${JSON.stringify(allStores.map(s => ({ name: s.storageName, key: s.storageIdentityKey.slice(0, 16) + "..." })))}`);
 
-      // Check sync state
       if (storage.getAuth && storage.runAsStorageProvider) {
         const auth = await storage.getAuth();
         log(`[DEBUG] Auth: userId=${auth.userId}, identityKey=${auth.identityKey.slice(0, 16)}...`);
@@ -270,16 +259,13 @@ export function DebugPanel({
     try {
       log("[PULL] Starting manual pull from remote (no push)...");
 
-      const rawWallet = targetWallet.rawWallet as unknown as {
-        _storage?: {
-          getAuth?: () => Promise<{ userId: number; identityKey: string }>;
-          getBackupStores?: () => string[];
-          syncFromReader?: (identityKey: string, remote: unknown) => Promise<{ inserts: number; updates: number; log?: string }>;
-          _stores?: Array<{ storage: unknown; settings?: { storageIdentityKey: string } }>;
-        };
+      const storage = targetWallet.storage as unknown as {
+        getAuth?: () => Promise<{ userId: number; identityKey: string }>;
+        getBackupStores?: () => string[];
+        syncFromReader?: (identityKey: string, remote: unknown) => Promise<{ inserts: number; updates: number; log?: string }>;
+        _stores?: Array<{ storage: unknown; settings?: { storageIdentityKey: string } }>;
       };
 
-      const storage = rawWallet._storage;
       if (!storage?.getAuth || !storage?.syncFromReader) {
         log("[PULL] Storage methods not available");
         return;
@@ -291,7 +277,6 @@ export function DebugPanel({
         return;
       }
 
-      // Find the backup store by its key
       const backupStore = storage._stores?.find(s =>
         s.settings?.storageIdentityKey && backupStoreKeys.includes(s.settings.storageIdentityKey)
       );

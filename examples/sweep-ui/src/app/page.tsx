@@ -506,30 +506,7 @@ function useDestinationWallet(addLog: (msg: string) => void): DestinationWalletS
       const result = await createWebWallet({
         privateKey: wif,
         chain: "main",
-        adminOriginator: "https://sweep-ui.local",
         storageIdentityKey: getOrCreateStorageIdentityKey(),
-        permissionsConfig: {
-          seekProtocolPermissionsForSigning: false,
-          seekProtocolPermissionsForEncrypting: false,
-          seekProtocolPermissionsForHMAC: false,
-          seekPermissionsForKeyLinkageRevelation: false,
-          seekPermissionsForPublicKeyRevelation: false,
-          seekPermissionsForIdentityKeyRevelation: false,
-          seekPermissionsForIdentityResolution: false,
-          seekBasketInsertionPermissions: false,
-          seekBasketRemovalPermissions: false,
-          seekBasketListingPermissions: false,
-          seekPermissionWhenApplyingActionLabels: false,
-          seekPermissionWhenListingActionsByLabel: false,
-          seekCertificateDisclosurePermissions: false,
-          seekCertificateAcquisitionPermissions: false,
-          seekCertificateRelinquishmentPermissions: false,
-          seekCertificateListingPermissions: false,
-          encryptWalletMetadata: false,
-          seekSpendingPermissions: false,
-          seekGroupedPermission: false,
-          differentiatePrivilegedOperations: false,
-        },
         remoteStorageUrl: REMOTE_STORAGE_URL,
       });
 
@@ -2000,28 +1977,36 @@ export default function SweepPage() {
 
       if (!cancelled) setTokenBalances(activeTokens);
 
-      // Validate each output against the overlay
+      // Validate outputs against the overlay in batch (one request per token)
       const results = await Promise.all(
         activeTokens.map(async (tb) => {
           const validated: IndexedOutput[] = [];
           const amounts = new Map<string, bigint>();
           let validatedAmount = 0n;
 
-          for (const output of tb.allOutputs) {
-            try {
-              const [txid, voutStr] = output.outpoint.split("_");
-              const vout = Number.parseInt(voutStr, 10);
-              const txData = await services.bsv21.getTokenByTxid(tb.tokenId, txid);
-              const found = txData.outputs.find((o) => o.vout === vout && !o.spend);
-              if (found) {
-                const amt = BigInt(found.data.bsv21.amt);
-                validated.push(output);
-                amounts.set(output.outpoint, amt);
-                validatedAmount += amt;
-              }
-            } catch {
-              // Output not found in overlay — skip
+          try {
+            const outpoints = tb.allOutputs.map((o) => o.outpoint);
+            const overlayResults = await services.bsv21.validateOutputs(
+              tb.tokenId,
+              outpoints,
+              { unspent: true, tags: "bsv21" }
+            );
+            const outputsByOutpoint = new Map(
+              tb.allOutputs.map((o) => [o.outpoint, o])
+            );
+            for (const result of overlayResults) {
+              const output = outputsByOutpoint.get(result.outpoint);
+              if (!output) continue;
+              const bsv21Data = result.data?.bsv21 as
+                | { amt: string }
+                | undefined;
+              const amt = BigInt(bsv21Data?.amt ?? "0");
+              validated.push(output);
+              amounts.set(result.outpoint, amt);
+              validatedAmount += amt;
             }
+          } catch {
+            // Token validation failed — leave all outputs unvalidated
           }
 
           return {

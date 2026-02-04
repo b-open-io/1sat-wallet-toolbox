@@ -17,8 +17,7 @@ import {
   Utils,
   type WalletOutput,
 } from "@bsv/sdk";
-import { deriveFundAddress } from "../../indexers";
-import { BSV21_BASKET, BSV21_FEE_SATS, BSV21_PROTOCOL } from "../constants";
+import { BSV21_BASKET, BSV21_PROTOCOL } from "../constants";
 import type { OneSatContext, Skill } from "../skills/types";
 
 // ============================================================================
@@ -222,8 +221,7 @@ export const getBsv21Balances: Skill<GetBsv21BalancesInput, Bsv21Balance[]> = {
       string,
       {
         id: string;
-        confirmed: bigint;
-        pending: bigint;
+        amt: bigint;
         icon?: string;
         sym?: string;
         dec: number;
@@ -235,15 +233,7 @@ export const getBsv21Balances: Skill<GetBsv21BalancesInput, Bsv21Balance[]> = {
       const amtTag = o.tags?.find((t) => t.startsWith("amt:"))?.slice(4);
       if (!idTag || !amtTag) continue;
 
-      const idContent = idTag.slice(3);
-      const lastColonIdx = idContent.lastIndexOf(":");
-      if (lastColonIdx === -1) continue;
-
-      const tokenId = idContent.slice(0, lastColonIdx);
-      const status = idContent.slice(lastColonIdx + 1);
-      if (status === "invalid") continue;
-
-      const isConfirmed = status === "valid";
+      const tokenId = idTag.slice(3);
       const amt = BigInt(amtTag);
       const dec = Number.parseInt(
         o.tags?.find((t) => t.startsWith("dec:"))?.slice(4) || "0",
@@ -254,13 +244,11 @@ export const getBsv21Balances: Skill<GetBsv21BalancesInput, Bsv21Balance[]> = {
 
       const existing = balanceMap.get(tokenId);
       if (existing) {
-        if (isConfirmed) existing.confirmed += amt;
-        else existing.pending += amt;
+        existing.amt += amt;
       } else {
         balanceMap.set(tokenId, {
           id: tokenId,
-          confirmed: isConfirmed ? amt : 0n,
-          pending: isConfirmed ? 0n : amt,
+          amt,
           sym: symTag,
           icon: iconTag,
           dec,
@@ -272,11 +260,11 @@ export const getBsv21Balances: Skill<GetBsv21BalancesInput, Bsv21Balance[]> = {
       p: "bsv-20",
       op: "transfer",
       dec: b.dec,
-      amt: (b.confirmed + b.pending).toString(),
+      amt: b.amt.toString(),
       id: b.id,
       sym: b.sym,
       icon: b.icon,
-      all: { confirmed: b.confirmed, pending: b.pending },
+      all: { confirmed: b.amt, pending: 0n },
       listed: { confirmed: 0n, pending: 0n },
     }));
   },
@@ -337,6 +325,16 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         return { error: "invalid-token-id-format" };
       }
 
+      if (!ctx.services) {
+        return { error: "services-required" };
+      }
+
+      const tokenDetails = await ctx.services.bsv21.getTokenDetails(tokenId);
+      if (!tokenDetails.status.is_active) {
+        return { error: "token-not-active" };
+      }
+      const { fee_address, fee_per_output } = tokenDetails.status;
+
       const result = await ctx.wallet.listOutputs({
         basket: BSV21_BASKET,
         includeTags: true,
@@ -347,19 +345,29 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       const tokenUtxos = result.outputs.filter((o) => {
         const idTag = o.tags?.find((t) => t.startsWith("id:"));
         if (!idTag) return false;
-
-        const idContent = idTag.slice(3);
-        const lastColonIdx = idContent.lastIndexOf(":");
-        if (lastColonIdx === -1) return false;
-
-        const id = idContent.slice(0, lastColonIdx);
-        const status = idContent.slice(lastColonIdx + 1);
-
-        return id === tokenId && status !== "invalid";
+        return idTag.slice(3) === tokenId;
       });
 
       if (tokenUtxos.length === 0) {
         return { error: "no-token-utxos-found" };
+      }
+
+      // Batch-validate all candidate outpoints against the overlay
+      const validOutpoints = new Set<string>();
+      if (ctx.services?.bsv21) {
+        const candidateOutpoints = tokenUtxos.map((o) => o.outpoint);
+        try {
+          const validated = await ctx.services.bsv21.validateOutputs(
+            tokenId,
+            candidateOutpoints,
+            { unspent: true },
+          );
+          for (const v of validated) {
+            validOutpoints.add(v.outpoint);
+          }
+        } catch {
+          return { error: "overlay-validation-failed" };
+        }
       }
 
       const selected: WalletOutput[] = [];
@@ -372,20 +380,9 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         if (!amtTag) continue;
         const utxoAmount = BigInt(amtTag.slice(4));
 
-        if (ctx.services?.bsv21) {
-          try {
-            const [txid] = utxo.outpoint.split("_");
-            const validation = await ctx.services.bsv21.getTokenByTxid(
-              tokenId,
-              txid,
-            );
-            const outputData = validation.outputs.find(
-              (o) => `${validation.txid}_${o.vout}` === utxo.outpoint,
-            );
-            if (!outputData) continue;
-          } catch {
-            continue;
-          }
+        // Skip UTXOs not confirmed in the overlay
+        if (validOutpoints.size > 0 && !validOutpoints.has(utxo.outpoint)) {
+          continue;
         }
 
         selected.push(utxo);
@@ -433,17 +430,10 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         outputDescription: `Send ${amount} tokens`,
       });
 
-      // Fee output to overlay fund address
-      const fundAddress = deriveFundAddress(tokenId);
-      outputs.push({
-        lockingScript: p2pkh.lock(fundAddress).toHex(),
-        satoshis: BSV21_FEE_SATS,
-        outputDescription: "Overlay processing fee",
-        tags: [],
-      });
-
       const change = totalIn - amount;
+      let tokenOutputCount = 1;
       if (change > 0n) {
+        tokenOutputCount = 2;
         const changeKeyID = `${tokenId}-${Date.now()}`;
         const { publicKey } = await ctx.wallet.getPublicKey({
           protocolID: BSV21_PROTOCOL,
@@ -462,7 +452,17 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
           satoshis: 1,
           outputDescription: "Token change",
           basket: BSV21_BASKET,
-          tags: [`id:${tokenId}`, `amt:${change}`],
+          tags: [
+            `id:${tokenId}`,
+            `amt:${change}`,
+            `dec:${tokenDetails.token.dec}`,
+            ...(tokenDetails.token.sym
+              ? [`sym:${tokenDetails.token.sym}`]
+              : []),
+            ...(tokenDetails.token.icon
+              ? [`icon:${tokenDetails.token.icon}`]
+              : []),
+          ],
           customInstructions: JSON.stringify({
             protocolID: BSV21_PROTOCOL,
             keyID: changeKeyID,
@@ -470,8 +470,15 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         });
       }
 
-      const symTag = tokenUtxos[0]?.tags?.find((t) => t.startsWith("sym:"));
-      const symbol = symTag ? symTag.slice(4) : tokenId.slice(0, 8);
+      // Fee output to overlay fund address (per token output)
+      outputs.push({
+        lockingScript: p2pkh.lock(fee_address).toHex(),
+        satoshis: fee_per_output * tokenOutputCount,
+        outputDescription: "Overlay processing fee",
+        tags: [],
+      });
+
+      const symbol = tokenDetails.token.sym || tokenId.slice(0, 8);
 
       const createResult = await ctx.wallet.createAction({
         description: `Send ${amount} ${symbol}`,
@@ -586,10 +593,12 @@ export const purchaseBsv21: Skill<
       const vout = Number.parseInt(voutStr, 10);
 
       try {
-        await ctx.services.bsv21.getTokenByTxid(tokenId, txid);
+        await ctx.services.bsv21.validateOutput(tokenId, outpoint);
       } catch {
         return { error: "listing-not-found-in-overlay" };
       }
+
+      const tokenDetails = await ctx.services.bsv21.getTokenDetails(tokenId);
 
       const beef = await ctx.services.getBeefForTxid(txid);
       const listingBeefTx = beef.findTxid(txid);
@@ -635,7 +644,15 @@ export const purchaseBsv21: Skill<
         satoshis: 1,
         outputDescription: "Purchased tokens",
         basket: BSV21_BASKET,
-        tags: [`id:${tokenId}`, `amt:${tokenAmount}`],
+        tags: [
+          `id:${tokenId}`,
+          `amt:${tokenAmount}`,
+          `dec:${tokenDetails.token.dec}`,
+          ...(tokenDetails.token.sym ? [`sym:${tokenDetails.token.sym}`] : []),
+          ...(tokenDetails.token.icon
+            ? [`icon:${tokenDetails.token.icon}`]
+            : []),
+        ],
         customInstructions: JSON.stringify({
           protocolID: BSV21_PROTOCOL,
           keyID: bsv21KeyID,
@@ -665,6 +682,16 @@ export const purchaseBsv21: Skill<
             tags: [],
           });
         }
+      }
+
+      // Fee output to overlay fund address
+      if (tokenDetails.status.is_active) {
+        outputs.push({
+          lockingScript: p2pkh.lock(tokenDetails.status.fee_address).toHex(),
+          satoshis: tokenDetails.status.fee_per_output,
+          outputDescription: "Overlay processing fee",
+          tags: [],
+        });
       }
 
       const createResult = await ctx.wallet.createAction({

@@ -774,6 +774,21 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
       }
       const { fee_address, fee_per_output } = tokenDetails.status;
 
+      // Validate all input outpoints exist in the overlay
+      const candidateOutpoints = inputs.map((i) => i.outpoint);
+      const validated = await ctx.services.bsv21.validateOutputs(
+        tokenId,
+        candidateOutpoints,
+        { unspent: true },
+      );
+      const validSet = new Set(validated.map((v) => v.outpoint));
+      const invalidInputs = inputs.filter((i) => !validSet.has(i.outpoint));
+      if (invalidInputs.length > 0) {
+        return {
+          error: `unvalidated-inputs: ${invalidInputs.map((i) => i.outpoint).join(", ")}`,
+        };
+      }
+
       // Parse WIF
       const privateKey = PrivateKey.fromWif(wif);
 
@@ -839,7 +854,15 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         satoshis: 1,
         outputDescription: `Sweep ${totalAmount} tokens`,
         basket: BSV21_BASKET,
-        tags: [`id:${tokenId}`, `amt:${totalAmount}`],
+        tags: [
+          `id:${tokenId}`,
+          `amt:${totalAmount}`,
+          `dec:${tokenDetails.token.dec}`,
+          ...(tokenDetails.token.sym ? [`sym:${tokenDetails.token.sym}`] : []),
+          ...(tokenDetails.token.icon
+            ? [`icon:${tokenDetails.token.icon}`]
+            : []),
+        ],
         customInstructions: JSON.stringify({
           protocolID: BSV21_PROTOCOL,
           keyID,

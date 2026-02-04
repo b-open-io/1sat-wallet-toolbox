@@ -5,5 +5,5 @@ export { ArcadeClient } from "./ArcadeClient";
 export { TxoClient } from "./TxoClient";
 export { OwnerClient } from "./OwnerClient";
 export { OrdfsClient } from "./OrdfsClient";
-export { Bsv21Client } from "./Bsv21Client";
+export { Bsv21Client, type OutputQueryOptions } from "./Bsv21Client";
 export { OverlayClient } from "./OverlayClient";
