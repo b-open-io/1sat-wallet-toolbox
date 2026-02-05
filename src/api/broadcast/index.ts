@@ -90,8 +90,9 @@ export const broadcast: Skill<BroadcastRequest, BroadcastResponse> = {
 
       return { txid };
     } catch (error) {
+      console.error("[broadcast]", error);
       return {
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "unknown-error",
       };
     }
   },

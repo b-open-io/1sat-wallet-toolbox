@@ -179,6 +179,7 @@ export const sendBsv: Skill<SendBsvInput, SendBsvResponse> = {
         rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
       };
     } catch (error) {
+      console.error("[sendBsv]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
@@ -239,6 +240,7 @@ export const sendAllBsv: Skill<SendAllBsvInput, SendBsvResponse> = {
         rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
       };
     } catch (error) {
+      console.error("[sendAllBsv]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };

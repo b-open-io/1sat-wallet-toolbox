@@ -210,6 +210,7 @@ export const lockBsv: Skill<LockBsvInput, LockOperationResponse> = {
         rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
       };
     } catch (error) {
+      console.error("[lockBsv]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
@@ -381,6 +382,7 @@ export const unlockBsv: Skill<UnlockBsvInput, LockOperationResponse> = {
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[unlockBsv]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };

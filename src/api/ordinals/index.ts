@@ -654,6 +654,7 @@ export const transferOrdinals: Skill<
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[transferOrdinals]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
@@ -733,6 +734,7 @@ export const listOrdinal: Skill<ListOrdinalRequest, OrdinalOperationResponse> =
           rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
         };
       } catch (error) {
+        console.error("[listOrdinal]", error);
         return {
           error: error instanceof Error ? error.message : "unknown-error",
         };
@@ -906,6 +908,7 @@ export const cancelListing: Skill<
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[cancelListing]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
@@ -1109,6 +1112,7 @@ export const purchaseOrdinal: Skill<
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[purchaseOrdinal]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };

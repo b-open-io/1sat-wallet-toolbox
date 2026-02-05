@@ -107,6 +107,7 @@ export const signMessage: Skill<SignMessageRequest, SignMessageResponse> = {
         derivationTag: tag,
       };
     } catch (error) {
+      console.error("[signMessage]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };

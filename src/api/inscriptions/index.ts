@@ -141,6 +141,7 @@ export const inscribe: Skill<InscribeRequest, InscribeResponse> = {
         rawtx: result.tx ? Utils.toHex(result.tx) : undefined,
       };
     } catch (error) {
+      console.error("[inscribe]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };

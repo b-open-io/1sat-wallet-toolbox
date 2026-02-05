@@ -348,12 +348,9 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         return idTag.slice(3) === tokenId;
       });
 
-      if (tokenUtxos.length === 0) {
-        return { error: "no-token-utxos-found" };
-      }
-
       // Batch-validate all candidate outpoints against the overlay
       const validOutpoints = new Set<string>();
+      let overlayValidated = false;
       if (ctx.services?.bsv21) {
         const candidateOutpoints = tokenUtxos.map((o) => o.outpoint);
         try {
@@ -362,10 +359,12 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
             candidateOutpoints,
             { unspent: true },
           );
+          overlayValidated = true;
           for (const v of validated) {
             validOutpoints.add(v.outpoint);
           }
-        } catch {
+        } catch (e) {
+          console.error("[sendBsv21] overlay validation error:", e);
           return { error: "overlay-validation-failed" };
         }
       }
@@ -381,7 +380,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         const utxoAmount = BigInt(amtTag.slice(4));
 
         // Skip UTXOs not confirmed in the overlay
-        if (validOutpoints.size > 0 && !validOutpoints.has(utxo.outpoint)) {
+        if (overlayValidated && !validOutpoints.has(utxo.outpoint)) {
           continue;
         }
 
@@ -390,7 +389,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
       }
 
       if (totalIn < amount) {
-        return { error: "insufficient-validated-tokens" };
+        return { error: "insufficient-tokens" };
       }
 
       let recipientAddress: string;
@@ -526,6 +525,7 @@ export const sendBsv21: Skill<SendBsv21Request, TokenOperationResponse> = {
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[sendBsv21]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
@@ -594,7 +594,8 @@ export const purchaseBsv21: Skill<
 
       try {
         await ctx.services.bsv21.validateOutput(tokenId, outpoint);
-      } catch {
+      } catch (e) {
+        console.error("[purchaseBsv21] overlay validation error:", e);
         return { error: "listing-not-found-in-overlay" };
       }
 
@@ -761,6 +762,7 @@ export const purchaseBsv21: Skill<
         rawtx: signResult.tx ? Utils.toHex(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[purchaseBsv21]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };

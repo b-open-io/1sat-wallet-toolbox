@@ -290,6 +290,7 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
         beef: signResult.tx ? Array.from(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[sweepBsv]", error);
       // Log detailed error info for WERR_REVIEW_ACTIONS
       if (error && typeof error === "object" && "sendWithResults" in error) {
         const werr = error as {
@@ -297,7 +298,7 @@ export const sweepBsv: Skill<SweepBsvRequest, SweepBsvResponse> = {
           txid?: string;
           message?: string;
         };
-        console.error("[sweep] WERR_REVIEW_ACTIONS details:", {
+        console.error("[sweepBsv] WERR_REVIEW_ACTIONS details:", {
           message: werr.message,
           txid: werr.txid,
           sendWithResults: JSON.stringify(werr.sendWithResults, null, 2),
@@ -687,6 +688,7 @@ export const sweepOrdinals: Skill<SweepOrdinalsRequest, SweepOrdinalsResponse> =
           beef: signResult.tx ? Array.from(signResult.tx) : undefined,
         };
       } catch (error) {
+        console.error("[sweepOrdinals]", error);
         return {
           error: error instanceof Error ? error.message : "unknown-error",
         };
@@ -966,6 +968,7 @@ export const sweepBsv21: Skill<SweepBsv21Request, SweepBsv21Response> = {
         beef: signResult.tx ? Array.from(signResult.tx) : undefined,
       };
     } catch (error) {
+      console.error("[sweepBsv21]", error);
       return {
         error: error instanceof Error ? error.message : "unknown-error",
       };
