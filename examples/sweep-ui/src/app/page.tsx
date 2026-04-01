@@ -460,7 +460,7 @@ function useCWIWallet(): CWIWalletState {
 }
 
 // Remote storage URL (same as yours-wallet uses)
-const REMOTE_STORAGE_URL = "https://1sat.shruggr.cloud/1sat/wallet";
+const REMOTE_STORAGE_URL = "https://api.1sat.app/1sat/wallet";
 
 // Destination wallet database name (different from main wallet to simulate fresh install)
 const DEST_WALLET_DB_NAME = "wallet-debug";

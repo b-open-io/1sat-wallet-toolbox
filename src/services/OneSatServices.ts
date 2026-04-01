@@ -95,7 +95,7 @@ export class OneSatServices implements WalletServices {
     this.baseUrl =
       baseUrl ||
       (chain === "main"
-        ? "https://1sat.shruggr.cloud"
+        ? "https://api.1sat.app"
         : "https://testnet.api.1sat.app");
 
     const opts: ClientOptions = { timeout: 30000 };

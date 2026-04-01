@@ -91,7 +91,7 @@ z1GeK+6bj9lsiRUhVaOmO787LWilygbW3qqrvMqALdkIPI4FG+wc...
 
 - **sweep-ui**: `examples/sweep-ui/` running at `http://localhost:4173`
 - **Debug BRC-100 wallet**: Created from WIF, syncs with remote storage
-- **Remote storage**: `https://1sat.shruggr.cloud/1sat/wallet`
+- **Remote storage**: `https://api.1sat.app/1sat/wallet`
 - **Sweep address**: `1DPbfnhdKsZwaYXZ96eARHKtb3ZUjeLdLf`
 
 ## Affected Ordinals

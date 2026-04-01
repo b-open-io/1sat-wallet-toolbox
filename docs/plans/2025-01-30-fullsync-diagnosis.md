@@ -404,7 +404,7 @@ await chrome.storage.local.set({ deviceId });
 const wallet = await createWebWallet({
   privateKey,
   chain: 'main',
-  remoteStorageUrl: 'https://1sat.shruggr.cloud/1sat/wallet',
+  remoteStorageUrl: 'https://api.1sat.app/1sat/wallet',
   deviceId,  // NEW
   // ...
 });

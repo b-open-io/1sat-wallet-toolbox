@@ -29,7 +29,7 @@ This is `@1sat/wallet-toolbox`, a BSV wallet library extending `@bsv/wallet-tool
 **OneSatServices** (`src/services/OneSatServices.ts`)
 - Implements `WalletServices` interface from wallet-toolbox
 - Facade coordinating specialized API clients
-- Default mainnet: `https://1sat.shruggr.cloud`, testnet: `https://testnet.api.1sat.app`
+- Default mainnet: `https://api.1sat.app`, testnet: `https://testnet.api.1sat.app`
 
 **API Clients** (`src/services/client/`)
 - `BaseClient` - Shared HTTP with timeout/error handling
